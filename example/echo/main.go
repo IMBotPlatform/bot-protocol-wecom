@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/IMBotPlatform/bot-protocol-wecom/pkg/wecom"
@@ -150,6 +151,64 @@ func main() {
 
 				// content 为空即可；IsFinal=true 触发最后一次回复携带 msg_item。
 				ch <- wecom.Chunk{MsgItems: []wecom.MixedItem{item}, IsFinal: true}
+				return
+			}
+
+			// 图文混排消息：同时包含文本和图片（图片 url 下载到的是加密文件，需要先解密）。
+			if ctx.Message.MsgType == "mixed" {
+				// mixed 中的文本和图片都在 mixed.msg_item[] 内，顶层不会有 ctx.Message.Text/Image。
+				textParts := make([]string, 0, 4)
+				msgItems := make([]wecom.MixedItem, 0, 2)
+
+				if ctx.Message.Mixed != nil {
+					for _, it := range ctx.Message.Mixed.Items {
+						switch strings.TrimSpace(it.MsgType) {
+						case "text":
+							if it.Text != nil && strings.TrimSpace(it.Text.Content) != "" {
+								textParts = append(textParts, it.Text.Content)
+							}
+						case "image":
+							// mixed.image.url 同样是“下载密文”，需下载并解密后才能回传为图片。
+							imgURL := ""
+							if it.Image != nil {
+								imgURL = strings.TrimSpace(it.Image.URL)
+							}
+							if imgURL == "" {
+								continue
+							}
+							if ctx.Bot == nil {
+								// 无 Bot 无法解密，直接跳过图片并兜底回复文本。
+								continue
+							}
+
+							dlCtx, cancel := context.WithTimeout(context.Background(), imageDownloadTimeout)
+							encryptedBytes, err := downloadURLBytes(dlCtx, imgURL, imageEncryptedMaxBytes)
+							cancel()
+							if err != nil {
+								// 图片失败不阻断整体回复，尽量先把文本回出去。
+								continue
+							}
+
+							plainBytes, err := ctx.Bot.DecryptDownloadedFile(encryptedBytes)
+							if err != nil || len(plainBytes) > imageMaxBytes {
+								continue
+							}
+
+							item, err := wecom.BuildStreamImageItemFromBytes(plainBytes)
+							if err != nil {
+								continue
+							}
+							msgItems = append(msgItems, item)
+						}
+					}
+				}
+
+				// content 仍沿用“回显”行为；图片通过 msg_item 回传（finish=true 时才会生效）。
+				content := ""
+				if len(textParts) > 0 {
+					content = fmt.Sprintf("收到消息: %s", strings.Join(textParts, "\n"))
+				}
+				ch <- wecom.Chunk{Content: content, MsgItems: msgItems, IsFinal: true}
 				return
 			}
 
