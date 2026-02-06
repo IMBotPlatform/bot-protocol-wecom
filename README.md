@@ -1,21 +1,27 @@
 # bot-protocol-wecom
 
-企业微信(WeCom) AI Bot SDK - 完整的 Go 实现。
+[![Go Reference](https://pkg.go.dev/badge/github.com/IMBotPlatform/bot-protocol-wecom.svg)](https://pkg.go.dev/github.com/IMBotPlatform/bot-protocol-wecom)
+[![Go Report Card](https://goreportcard.com/badge/github.com/IMBotPlatform/bot-protocol-wecom)](https://goreportcard.com/report/github.com/IMBotPlatform/bot-protocol-wecom)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## 功能
+> 🤖 企业微信(WeCom) AI Bot SDK - 完整的 Go 实现
 
-- **完整 Bot 能力**: HTTP 服务器、流式响应、主动回复
-- **消息加解密**: AES-CBC 加解密，签名校验
-- **消息类型**: 文本、图片、语音、文件、图文混排、流式消息、事件
-- **模板卡片**: 完整的企业微信模板卡片类型支持
+## ✨ 功能特性
 
-## 安装
+| 功能 | 描述 |
+|------|------|
+| 🌐 **完整 Bot 能力** | HTTP 服务器、流式响应、主动回复 |
+| 🔐 **消息加解密** | AES-CBC 加解密，签名校验 |
+| 💬 **消息类型** | 文本、图片、语音、文件、图文混排、流式消息、事件 |
+| 🎴 **模板卡片** | 完整的企业微信模板卡片类型支持 |
+
+## 📦 安装
 
 ```bash
 go get github.com/IMBotPlatform/bot-protocol-wecom
 ```
 
-## 快速开始
+## 🚀 快速开始
 
 ```go
 package main
@@ -50,7 +56,7 @@ func main() {
 }
 ```
 
-## 目录结构
+## 📁 目录结构
 
 ```
 bot-protocol-wecom/
@@ -66,7 +72,7 @@ bot-protocol-wecom/
 └── docs/                # 官方协议文档
 ```
 
-## 主动回复
+## 📤 主动回复
 
 ```go
 handler := wecom.HandlerFunc(func(ctx wecom.Context) <-chan wecom.Chunk {
@@ -79,10 +85,14 @@ handler := wecom.HandlerFunc(func(ctx wecom.Context) <-chan wecom.Chunk {
 })
 ```
 
-## 文档
+## 📖 文档
 
-官方协议文档位于 `docs/wecom_ai_bot/` 目录。
+官方协议文档位于 [`docs/wecom_ai_bot/`](./docs/wecom_ai_bot/) 目录。
 
-## License
+## 🤝 贡献
 
-MIT
+欢迎提交 Issue 和 Pull Request！
+
+## 📄 License
+
+[MIT](LICENSE) © IMBotPlatform
