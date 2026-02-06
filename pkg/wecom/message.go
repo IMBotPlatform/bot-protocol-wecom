@@ -43,9 +43,13 @@ type TextPayload struct {
 
 // ImagePayload 为图片消息内容。
 type ImagePayload struct {
-	URL    string `json:"url,omitempty"`    // 图片访问地址
+	URL    string `json:"url,omitempty"`    // 图片访问地址（密文下载地址）
 	Base64 string `json:"base64,omitempty"` // 流式回复时使用
 	MD5    string `json:"md5,omitempty"`    // 流式回复时使用
+	// Data 存储解密后的原始图片字节（仅在接收消息时由协议层自动填充）。
+	// 当 URL 非空时，协议层会自动下载密文并解密后填入此字段。
+	// 上层应用应优先使用此字段获取图片数据，而非直接下载 URL。
+	Data []byte `json:"-"` // 不序列化到 JSON
 }
 
 // VoicePayload 为语音消息内容。

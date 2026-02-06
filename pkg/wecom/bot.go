@@ -230,6 +230,11 @@ func (b *Bot) handlePost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
+
+	// 第四步：自动下载并解密消息中的图片数据。
+	// 企业微信的 image.url 返回的是 AES-CBC 加密的密文，需要解密后才能使用。
+	b.decryptMessageImages(msg)
+
 	// 关键步骤：反馈事件仅支持空包回复，直接返回 200，避免进入 handler。
 	if msg.MsgType == "event" && msg.Event != nil && (msg.Event.FeedbackEvent != nil || msg.Event.EventType == "feedback_event") {
 		w.WriteHeader(http.StatusOK)
@@ -453,4 +458,77 @@ func (b *Bot) DecryptDownloadedFile(cipherData []byte) ([]byte, error) {
 		return nil, errors.New("bot crypto is nil")
 	}
 	return b.crypto.DecryptDownloadedFile(cipherData)
+}
+
+// decryptMessageImages 自动下载并解密消息中所有图片 URL，将解密后的数据填入 ImagePayload.Data。
+// 企业微信回调的 image.url 返回的是 AES-CBC 加密密文，需要下载并解密后才能作为图片使用。
+// 此方法会处理：
+//   - MsgType=image 的顶层图片
+//   - MsgType=mixed 中的 image 子消息
+//
+// 解密失败时会静默忽略（不中断流程）。
+func (b *Bot) decryptMessageImages(msg *Message) {
+	if msg == nil || b == nil {
+		return
+	}
+
+	// 处理顶层 image 消息
+	if msg.MsgType == "image" && msg.Image != nil {
+		b.decryptImagePayload(msg.Image)
+	}
+
+	// 处理 mixed 消息中的 image 子消息
+	if msg.MsgType == "mixed" && msg.Mixed != nil {
+		for i := range msg.Mixed.Items {
+			if msg.Mixed.Items[i].MsgType == "image" && msg.Mixed.Items[i].Image != nil {
+				b.decryptImagePayload(msg.Mixed.Items[i].Image)
+			}
+		}
+	}
+}
+
+// decryptImagePayload 下载并解密单个 ImagePayload。
+func (b *Bot) decryptImagePayload(img *ImagePayload) {
+	if img == nil || img.URL == "" {
+		return
+	}
+
+	// 下载密文
+	cipherData, err := b.downloadURL(img.URL)
+	if err != nil {
+		return
+	}
+
+	// 解密
+	plainData, err := b.DecryptDownloadedFile(cipherData)
+	if err != nil {
+		return
+	}
+
+	// 填充解密后的数据
+	img.Data = plainData
+}
+
+// downloadURL 下载指定 URL 的内容。
+func (b *Bot) downloadURL(url string) ([]byte, error) {
+	if b.client == nil {
+		return nil, errors.New("http client is nil")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := b.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("download: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("download: status=%d", resp.StatusCode)
+	}
+
+	return io.ReadAll(resp.Body)
 }
