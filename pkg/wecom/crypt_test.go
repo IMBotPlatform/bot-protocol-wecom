@@ -3,7 +3,10 @@ package wecom
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -166,4 +169,128 @@ func TestDecryptMessageWithDocSample(t *testing.T) {
 	if string(plain) != expectedXML {
 		t.Fatalf("unexpected plaintext:\n%s", plain)
 	}
+}
+
+func TestCryptDecryptDownloadedFileRoundTrip(t *testing.T) {
+	rawKey := bytes.Repeat([]byte{0x23}, 32)
+	encodingKey := strings.TrimRight(base64.StdEncoding.EncodeToString(rawKey), "=")
+	crypt, err := NewCrypt("token", encodingKey, "")
+	if err != nil {
+		t.Fatalf("create crypt: %v", err)
+	}
+
+	plain := bytes.Repeat([]byte("wecom-file-plain-"), 7) // 故意构造非 32 对齐长度，覆盖 padding
+	cipherData, err := encryptDownloadedFileForTest(crypt.aesKey, plain)
+	if err != nil {
+		t.Fatalf("encrypt downloaded file: %v", err)
+	}
+
+	got, err := crypt.DecryptDownloadedFile(cipherData)
+	if err != nil {
+		t.Fatalf("decrypt downloaded file: %v", err)
+	}
+	if !bytes.Equal(got, plain) {
+		t.Fatalf("round-trip mismatch: got=%q want=%q", string(got), string(plain))
+	}
+}
+
+func TestBotDecryptDownloadedFileRoundTrip(t *testing.T) {
+	rawKey := bytes.Repeat([]byte{0x45}, 32)
+	encodingKey := strings.TrimRight(base64.StdEncoding.EncodeToString(rawKey), "=")
+	crypt, err := NewCrypt("token", encodingKey, "")
+	if err != nil {
+		t.Fatalf("create crypt: %v", err)
+	}
+	bot := &Bot{crypto: crypt}
+
+	plain := []byte("binary\x00payload")
+	cipherData, err := encryptDownloadedFileForTest(crypt.aesKey, plain)
+	if err != nil {
+		t.Fatalf("encrypt downloaded file: %v", err)
+	}
+
+	got, err := bot.DecryptDownloadedFile(cipherData)
+	if err != nil {
+		t.Fatalf("bot decrypt downloaded file: %v", err)
+	}
+	if !bytes.Equal(got, plain) {
+		t.Fatalf("round-trip mismatch: got=%v want=%v", got, plain)
+	}
+}
+
+func TestCryptDecryptDownloadedFileErrors(t *testing.T) {
+	t.Run("nil receiver", func(t *testing.T) {
+		var crypt *Crypt
+		_, err := crypt.DecryptDownloadedFile(make([]byte, 16))
+		if err == nil || !strings.Contains(err.Error(), "crypt is nil") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("empty data", func(t *testing.T) {
+		rawKey := bytes.Repeat([]byte{0x11}, 32)
+		encodingKey := strings.TrimRight(base64.StdEncoding.EncodeToString(rawKey), "=")
+		crypt, err := NewCrypt("token", encodingKey, "")
+		if err != nil {
+			t.Fatalf("create crypt: %v", err)
+		}
+		_, err = crypt.DecryptDownloadedFile(nil)
+		if err == nil || !strings.Contains(err.Error(), "cipher data is empty") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("invalid ciphertext length", func(t *testing.T) {
+		rawKey := bytes.Repeat([]byte{0x11}, 32)
+		encodingKey := strings.TrimRight(base64.StdEncoding.EncodeToString(rawKey), "=")
+		crypt, err := NewCrypt("token", encodingKey, "")
+		if err != nil {
+			t.Fatalf("create crypt: %v", err)
+		}
+
+		_, err = crypt.DecryptDownloadedFile(make([]byte, 15))
+		if err == nil || !strings.Contains(err.Error(), "invalid ciphertext length") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("invalid aes key length", func(t *testing.T) {
+		crypt := &Crypt{aesKey: bytes.Repeat([]byte{0x11}, 31)}
+		_, err := crypt.DecryptDownloadedFile(make([]byte, 16))
+		if err == nil || !errors.Is(err, ErrInvalidAESKey) {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
+func TestBotDecryptDownloadedFileErrors(t *testing.T) {
+	t.Run("nil bot", func(t *testing.T) {
+		var bot *Bot
+		_, err := bot.DecryptDownloadedFile(make([]byte, 16))
+		if err == nil || !strings.Contains(err.Error(), "bot is nil") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("nil crypto", func(t *testing.T) {
+		bot := &Bot{}
+		_, err := bot.DecryptDownloadedFile(make([]byte, 16))
+		if err == nil || !strings.Contains(err.Error(), "bot crypto is nil") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
+func encryptDownloadedFileForTest(aesKey, plain []byte) ([]byte, error) {
+	// 下载文件协议：PKCS#7 padding blockSize=32，然后 AES-256-CBC 加密，IV=aesKey[:16]。
+	block, err := aes.NewCipher(aesKey)
+	if err != nil {
+		return nil, err
+	}
+	iv := aesKey[:aes.BlockSize]
+	buf := pkcs7Pad(plain, padBlockSize)
+	mode := cipher.NewCBCEncrypter(block, iv)
+	cipherData := make([]byte, len(buf))
+	mode.CryptBlocks(cipherData, buf)
+	return cipherData, nil
 }

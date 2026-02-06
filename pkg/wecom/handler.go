@@ -5,10 +5,14 @@ package wecom
 //   - Content: 文本内容（企业微信要求为累积完整内容）
 //   - Payload: 扩展负载（模板卡片等非流式回复）
 //   - IsFinal: 是否为最终片段
+//   - MsgItems: 图文混排子消息（用于流式回复 msg_item，仅在 IsFinal=true 时生效）
 type Chunk struct {
 	Content string
 	Payload any
 	IsFinal bool
+	// MsgItems 用于在流式结束包（IsFinal=true）中携带图文混排子消息。
+	// 企业微信目前仅支持在 finish=true 的最后一次回复中包含 msg_item（如图片）。
+	MsgItems []MixedItem
 }
 
 // NoResponse 是一个哨兵值，用于标记不需要被动回复。

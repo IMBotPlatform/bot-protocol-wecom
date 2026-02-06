@@ -1,6 +1,11 @@
 package wecom
 
-import "encoding/json"
+import (
+	"crypto/md5"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+)
 
 // ==================================== Request ====================================
 
@@ -234,4 +239,46 @@ func BuildStreamReply(streamID, content string, finish bool) StreamReply {
 			Content: content,
 		},
 	}
+}
+
+// BuildStreamReplyWithMsgItems 根据 streamID 组装带 msg_item 的流式回复明文。
+// 注意：企业微信要求 msg_item 仅在 finish=true（即流式结束的最后一次回复）中出现。
+//
+// Parameters:
+//   - streamID: 流式会话 ID
+//   - content: 当前累计内容
+//   - finish: 是否结束
+//   - items: 图文混排子消息列表（如图片）
+//
+// Returns:
+//   - StreamReply: 组装后的流式回复体
+func BuildStreamReplyWithMsgItems(streamID, content string, finish bool, items []MixedItem) StreamReply {
+	reply := BuildStreamReply(streamID, content, finish)
+	if finish && len(items) > 0 {
+		// 拷贝 slice，避免调用方复用/修改底层数组影响已发布内容。
+		cloned := make([]MixedItem, len(items))
+		copy(cloned, items)
+		reply.Stream.MsgItem = cloned
+	}
+	return reply
+}
+
+// BuildStreamImageItemFromBytes 从原始图片字节构造流式图文混排的 image 子消息。
+// 注意：本函数不校验图片格式（JPG/PNG）及大小（10MB）限制；调用方需自行保证入参符合企业微信约束。
+//
+// Parameters:
+//   - img: 图片原始字节（base64 编码前）
+//
+// Returns:
+//   - MixedItem: 构造出的 image 子消息
+//   - error: 预留错误返回（当前实现不会返回非 nil）
+func BuildStreamImageItemFromBytes(img []byte) (MixedItem, error) {
+	sum := md5.Sum(img)
+	return MixedItem{
+		MsgType: "image",
+		Image: &ImagePayload{
+			Base64: base64.StdEncoding.EncodeToString(img),
+			MD5:    hex.EncodeToString(sum[:]),
+		},
+	}, nil
 }

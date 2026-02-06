@@ -121,6 +121,14 @@ func (m *StreamManager) publish(streamID string, chunk Chunk) bool {
 		fullChunk.Content = stream.LastChunk.Content + chunk.Content
 	} else if chunk.Payload != nil {
 		fullChunk.Content = ""
+		// 非流式回复不允许携带 msg_item，避免混用导致协议异常。
+		fullChunk.MsgItems = nil
+	}
+	if len(fullChunk.MsgItems) > 0 {
+		// 拷贝 slice，避免调用方复用/修改底层数组影响已发布内容。
+		cloned := make([]MixedItem, len(fullChunk.MsgItems))
+		copy(cloned, fullChunk.MsgItems)
+		fullChunk.MsgItems = cloned
 	}
 	stream.LastChunk = &fullChunk
 	finished := fullChunk.IsFinal

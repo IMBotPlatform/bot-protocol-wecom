@@ -261,6 +261,46 @@ func (c *Crypt) Decrypt(cipherText string) ([]byte, error) {
 	return c.decrypt(cipherText)
 }
 
+// DecryptDownloadedFile 解密企业微信“下载文件”接口返回的二进制密文数据。
+// Parameters:
+//   - cipherData: 下载接口返回的密文字节（非 Base64 字符串）
+//
+// Returns:
+//   - []byte: 解密后的明文字节
+//   - error: 当入参不合法、AES 解密失败或去填充失败时返回错误
+//
+// 说明：
+//   - 算法：AES-256-CBC
+//   - IV：AESKey 前 16 字节（即 c.aesKey[:16]）
+//   - Padding：PKCS#7，块大小为 32（企业微信协议指定）
+func (c *Crypt) DecryptDownloadedFile(cipherData []byte) ([]byte, error) {
+	if c == nil {
+		return nil, errors.New("crypt is nil")
+	}
+	if len(cipherData) == 0 {
+		return nil, errors.New("cipher data is empty")
+	}
+	if len(c.aesKey) != 32 {
+		return nil, fmt.Errorf("%w: got %d, want 32", ErrInvalidAESKey, len(c.aesKey))
+	}
+	if len(cipherData)%aes.BlockSize != 0 {
+		return nil, fmt.Errorf("invalid ciphertext length: %d (must be multiple of %d)", len(cipherData), aes.BlockSize)
+	}
+
+	// 构造 AES 块密码器，并使用 AESKey 前 16 字节作为 IV 进行 CBC 解密。
+	block, err := aes.NewCipher(c.aesKey)
+	if err != nil {
+		return nil, err
+	}
+	iv := c.aesKey[:aes.BlockSize]
+	mode := cipher.NewCBCDecrypter(block, iv)
+	plain := make([]byte, len(cipherData))
+	mode.CryptBlocks(plain, cipherData)
+
+	// 下载文件协议使用 PKCS#7，blockSize=32。
+	return pkcs7Unpad(plain, padBlockSize)
+}
+
 // decodeAESKey 将企业微信提供的 EncodingAESKey 转换为 32 字节 AES 密钥。
 // Parameters:
 //   - encodingKey: 企业微信后台配置的 43 字节编码串

@@ -321,6 +321,12 @@ func (b *Bot) refresh(msg *Message, timestamp, nonce string) (EncryptedResponse,
 		return b.crypto.EncryptResponse(chunk.Payload, timestamp, nonce)
 	}
 
+	// 仅在流式结束（finish=true）时允许携带 msg_item（如图片）。
+	if chunk.IsFinal && len(chunk.MsgItems) > 0 {
+		reply := BuildStreamReplyWithMsgItems(streamID, chunk.Content, true, chunk.MsgItems)
+		return b.crypto.EncryptResponse(reply, timestamp, nonce)
+	}
+
 	reply := BuildStreamReply(streamID, chunk.Content, chunk.IsFinal)
 	return b.crypto.EncryptResponse(reply, timestamp, nonce)
 }
@@ -363,7 +369,8 @@ func (b *Bot) doHandler(outCh <-chan Chunk, streamID string) {
 			}
 			return
 		}
-		if chunk.Content == "" && chunk.Payload == nil && !chunk.IsFinal {
+		// 空 chunk 过滤：不能丢弃仅携带 MsgItems 的片段。
+		if chunk.Content == "" && chunk.Payload == nil && len(chunk.MsgItems) == 0 && !chunk.IsFinal {
 			continue
 		}
 
@@ -429,4 +436,21 @@ func (b *Bot) ResponseTemplateCard(responseURL string, card *TemplateCard) error
 		TemplateCard: card,
 	}
 	return b.Response(responseURL, msg)
+}
+
+// DecryptDownloadedFile 解密企业微信“下载文件”接口返回的二进制密文数据。
+// Parameters:
+//   - cipherData: 下载接口返回的密文字节（非 Base64 字符串）
+//
+// Returns:
+//   - []byte: 解密后的明文字节
+//   - error: 当 Bot/crypto 未初始化或解密失败时返回错误
+func (b *Bot) DecryptDownloadedFile(cipherData []byte) ([]byte, error) {
+	if b == nil {
+		return nil, errors.New("bot is nil")
+	}
+	if b.crypto == nil {
+		return nil, errors.New("bot crypto is nil")
+	}
+	return b.crypto.DecryptDownloadedFile(cipherData)
 }
