@@ -308,10 +308,17 @@ func (b *Bot) refresh(msg *Message, timestamp, nonce string) (EncryptedResponse,
 		return b.crypto.EncryptResponse(reply, timestamp, nonce)
 	}
 
-	// 第二步：从会话中获取最新累计片段。
+	// 第二步：检查流式会话是否存在（重启后会话内存丢失属常见场景）。
+	// 若会话不存在，直接返回终止包，让企业微信立即结束流式气泡。
+	if !b.streamMgr.hasStream(streamID) {
+		reply := BuildStreamReply(streamID, "", true)
+		return b.crypto.EncryptResponse(reply, timestamp, nonce)
+	}
+
+	// 第三步：从会话中获取最新累计片段。
 	chunk := b.streamMgr.getLatestChunk(streamID)
 	if chunk == nil {
-		// 无片段可用，返回保持连接的空包。
+		// 会话存在但暂无片段（pipeline 还在产出中），返回保持连接的空包。
 		reply := BuildStreamReply(streamID, "", false)
 		return b.crypto.EncryptResponse(reply, timestamp, nonce)
 	}

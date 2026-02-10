@@ -309,6 +309,22 @@ func (m *StreamManager) getStream(streamID string) *Stream {
 	return stream
 }
 
+// hasStream 检查指定 streamID 的会话是否存在（不获取具体数据）。
+// Parameters:
+//   - streamID: 会话标识
+//
+// Returns:
+//   - bool: 会话是否存在
+func (m *StreamManager) hasStream(streamID string) bool {
+	if streamID == "" {
+		return false
+	}
+	m.mu.RLock()
+	_, ok := m.streams[streamID]
+	m.mu.RUnlock()
+	return ok
+}
+
 // touch 更新会话的最后访问时间。
 func (s *Stream) touch() {
 	// 互斥方式更新最后访问时间，保持会话活跃状态。
