@@ -44,6 +44,7 @@ type TextPayload struct {
 // ImagePayload 为图片消息内容。
 type ImagePayload struct {
 	URL    string `json:"url,omitempty"`    // 图片访问地址（密文下载地址）
+	AESKey string `json:"aeskey,omitempty"` // 长连接模式下返回的资源解密密钥
 	Base64 string `json:"base64,omitempty"` // 流式回复时使用
 	MD5    string `json:"md5,omitempty"`    // 流式回复时使用
 	// Data 存储解密后的原始图片字节（仅在接收消息时由协议层自动填充）。
@@ -59,7 +60,8 @@ type VoicePayload struct {
 
 // FilePayload 为文件消息内容。
 type FilePayload struct {
-	URL string `json:"url"` // 文件下载地址
+	URL    string `json:"url"`              // 文件下载地址
+	AESKey string `json:"aeskey,omitempty"` // 长连接模式下返回的资源解密密钥
 }
 
 // MixedPayload 表示图文混排消息。

@@ -22,14 +22,18 @@ var NoResponse = struct{}{}
 // Context 承载单次请求的上下文信息。
 // Fields:
 //   - Message: 解密后的企业微信消息
+//   - RequestID: 当前回调请求的 req_id（长连接模式下用于关联响应）
 //   - StreamID: 流式会话 ID
 //   - ResponseURL: 主动回复 URL（有效期 1 小时）
 //   - Bot: Bot 实例，用于主动回复
+//   - LongConn: LongConnBot 实例，用于长连接模式下的主动推送
 type Context struct {
 	Message     *Message
+	RequestID   string
 	StreamID    string
 	ResponseURL string
 	Bot         *Bot
+	LongConn    *LongConnBot
 }
 
 // Handler 定义业务处理器接口，由用户实现。

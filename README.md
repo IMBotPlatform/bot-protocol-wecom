@@ -10,7 +10,8 @@
 
 | 功能 | 描述 |
 |------|------|
-| 🌐 **完整 Bot 能力** | HTTP 服务器、流式响应、主动回复 |
+| 🌐 **双接入模式** | 支持 Webhook 回调模式与 WebSocket 长连接模式 |
+| 🤖 **完整 Bot 能力** | 流式响应、主动回复、模板卡片、事件处理 |
 | 🔐 **消息加解密** | AES-CBC 加解密，签名校验 |
 | 💬 **消息类型** | 文本、图片、语音、文件、图文混排、流式消息、事件 |
 | 🎴 **模板卡片** | 完整的企业微信模板卡片类型支持 |
@@ -21,7 +22,16 @@
 go get github.com/IMBotPlatform/bot-protocol-wecom
 ```
 
+## 🧭 模式选择
+
+| 模式 | 入口 | 适用场景 | 关键凭证 |
+|------|------|------|------|
+| Webhook 回调 | `wecom.NewBot(...)` | 已有公网回调地址、沿用现有企业微信回调模式 | `TOKEN` / `ENCODING_AES_KEY` / `CORP_ID` |
+| WebSocket 长连接 | `wecom.NewLongConnBot(...)` | 无公网 IP、高实时性、希望由服务端主动保持连接 | `BOT_ID` / `SECRET` |
+
 ## 🚀 快速开始
+
+### 1. Webhook 回调模式
 
 ```go
 package main
@@ -56,6 +66,41 @@ func main() {
 }
 ```
 
+### 2. WebSocket 长连接模式
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+
+    "github.com/IMBotPlatform/bot-protocol-wecom/pkg/wecom"
+)
+
+func main() {
+    handler := wecom.HandlerFunc(func(ctx wecom.Context) <-chan wecom.Chunk {
+        ch := make(chan wecom.Chunk, 1)
+        ch <- wecom.Chunk{Content: "收到长连接消息", IsFinal: true}
+        close(ch)
+        return ch
+    })
+
+    bot, err := wecom.NewLongConnBot("BOT_ID", "SECRET", handler)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    log.Println("LongConn Bot starting...")
+    if err := bot.Start(ctx); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
 ## 📁 目录结构
 
 ```
@@ -63,6 +108,8 @@ bot-protocol-wecom/
 ├── pkg/wecom/           # SDK 核心代码
 │   ├── bot.go           # Bot 结构体和 HTTP 处理
 │   ├── crypt.go         # 加解密实现
+│   ├── longconn_bot.go  # 长连接连接管理与回调分发
+│   ├── longconn_message.go # 长连接协议结构
 │   ├── message.go       # 消息类型定义
 │   ├── handler.go       # Handler 接口
 │   ├── stream.go        # StreamManager
@@ -84,6 +131,59 @@ handler := wecom.HandlerFunc(func(ctx wecom.Context) <-chan wecom.Chunk {
     return ch
 })
 ```
+
+## 📡 长连接主动推送
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+
+    "github.com/IMBotPlatform/bot-protocol-wecom/pkg/wecom"
+)
+
+func main() {
+    bot, err := wecom.NewLongConnBot("BOT_ID", "SECRET", nil)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    go func() {
+        if err := bot.Start(ctx); err != nil {
+            log.Printf("longconn stopped: %v", err)
+        }
+    }()
+
+    // 主动推送消息到单聊 userid 或群聊 chatid。
+    _ = bot.SendMarkdown("CHAT_ID", "**hello from longconn**")
+}
+```
+
+## ⚙️ 常用环境变量
+
+| 环境变量 | 说明 |
+|------|------|
+| `BOT_HTTP_TIMEOUT` | Webhook 模式主动回复 HTTP 超时 |
+| `BOT_STREAM_TTL` | Webhook 模式流式会话保留时间 |
+| `BOT_STREAM_WAIT_TIMEOUT` | Webhook 模式流式刷新等待时间 |
+| `BOT_LONG_CONN_WS_URL` | 长连接 WebSocket 地址，默认 `wss://openws.work.weixin.qq.com` |
+| `BOT_LONG_CONN_PING_INTERVAL` | 长连接心跳间隔，单位秒 |
+| `BOT_LONG_CONN_RECONNECT_INTERVAL` | 长连接断线重连间隔，单位秒 |
+| `BOT_LONG_CONN_REQUEST_TIMEOUT` | 长连接单次命令超时，单位秒 |
+| `BOT_LONG_CONN_WRITE_TIMEOUT` | 长连接单次写入超时，单位秒 |
+
+## 📝 长连接说明
+
+- 长连接模式会自动完成订阅、心跳和断线重连。
+- 普通消息回调会自动映射到 `aibot_respond_msg`。
+- `enter_chat` 事件会自动映射到 `aibot_respond_welcome_msg`。
+- `template_card_event` 会自动映射到 `aibot_respond_update_msg`。
+- 长连接资源消息目前会透出 `aeskey` 字段，便于调用方自行做图片/文件解密下载。
 
 ## 📖 文档
 
