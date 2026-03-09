@@ -10,120 +10,122 @@
 | 类型 | 字段 (`MsgType`) | 对应结构体 | 说明 |
 | :--- | :--- | :--- | :--- |
 | **文本** | `text` | `TextPayload` | 用户发送的普通文本 |
-| **图片** | `image` | `ImagePayload` | 用户发送的图片 (含 URL) |
+| **图片** | `image` | `ImagePayload` | 用户发送的图片 (含 URL，需解密) |
 | **语音** | `voice` | `VoicePayload` | 用户发送的语音 (含转录文本) |
-| **文件** | `file` | `FilePayload` | 用户发送的文件 (含下载 URL) |
+| **文件** | `file` | `FilePayload` | 用户发送的文件 (含下载 URL，需解密) |
 | **图文混排** | `mixed` | `MixedPayload` | 包含文本和图片的组合消息 |
 | **引用消息** | (无独立类型) | `QuotePayload` | 嵌套在上述消息中的 `quote` 字段 |
 
 ### 1.2 接收事件 (Bot 接收)
-| 事件场景 | `EventType` | 对应结构体 | 默认路由行为 |
+| 事件场景 | `EventType` | 对应结构体 | 说明 |
 | :--- | :--- | :--- | :--- |
-| **进入会话** | `enter_chat` | `EnterChat` | 不自动路由，交由上层按 `event_type` 处理 |
-| **模板卡片交互** | `template_card_event` | `TemplateCardEvent` | 将 `event_key` 作为指令执行 (e.g. `/click`) |
-| **用户反馈** | `feedback_event` | `FeedbackEvent` | 默认直接 200，不进入 pipeline（需处理可自行改造） |
+| **进入会话** | `enter_chat` | `EnterChat` | 用户当天首次进入单聊会话 |
+| **模板卡片交互** | `template_card_event` | `TemplateCardEvent` | 用户点击卡片按钮 |
+| **用户反馈** | `feedback_event` | `FeedbackEvent` | 用户对回复进行准确/不准确反馈 |
 
 ### 1.3 被动回复 (同步 HTTP 响应)
-| 类型 | 字段 (`MsgType`) | 结构体 | 适用场景 |
-| :--- | :--- | :--- | :--- |
-| **流式文本** | `stream` | `StreamReply` | **核心功能**，AI 对话逐字输出 |
-| **流式+图文** | `stream` | `StreamReply` | 流式结束 (`finish=true`) 时附带图片 |
-| **普通文本** | `text` | `TextMessage` | 简单的非流式回复 (如指令报错) |
-| **模板卡片** | `template_card` | `TemplateCardMessage` | 发送欢迎语、功能菜单 |
-| **流式+卡片** | `stream_with_template_card` | `StreamWithTemplateCardMessage` | AI 回复的同时下发一张卡片 |
-| **更新卡片** | `update_template_card` | `UpdateTemplateCardMessage` | 用户点击按钮后，更新原卡片状态 |
+| 类型 | 字段 (`MsgType`) | 说明 |
+| :--- | :--- | :--- |
+| **流式文本** | `stream` | **核心功能**，AI 对话逐字输出 |
+| **流式+图文** | `stream` | 流式结束 (`finish=true`) 时附带图片 |
+| **普通文本** | `text` | 简单的非流式回复 |
+| **模板卡片** | `template_card` | 发送欢迎语、功能菜单 |
+| **流式+卡片** | `stream_with_template_card` | AI 回复的同时下发一张卡片 |
+| **更新卡片** | `update_template_card` | 用户点击按钮后，更新原卡片状态 |
 
 ### 1.4 主动回复 (异步 HTTP 推送)
 利用 `response_url` 在 1 小时内主动下发。
 
-| 类型 | 字段 (`MsgType`) | 结构体 | 调用方式 |
-| :--- | :--- | :--- | :--- |
-| **Markdown** | `markdown` | `MarkdownMessage` | `ctx.ResponseMarkdown(...)` |
-| **模板卡片** | `template_card` | `TemplateCardMessage` | `ctx.ResponseTemplateCard(...)` |
+| 类型 | 字段 (`MsgType`) | 调用方式 |
+| :--- | :--- | :--- |
+| **Markdown** | `markdown` | `bot.ResponseMarkdown(responseURL, content)` |
+| **模板卡片** | `template_card` | `bot.ResponseTemplateCard(responseURL, card)` |
 
 ---
 
 ## 2. 三种回复模式 (开发核心)
 
-在 Command 的 `Run` 方法中，你可以根据需求选择三种不同的回复模式。
+在 `Handler` 的实现中，你可以根据需求选择三种不同的回复模式。
 
 ### 2.1 模式一：流式文本回复 (默认)
-最常用的模式。只要通过 `cmd.Printf` 或 `cmd.Println` 输出内容，系统就会自动建立流式会话，将内容逐字推送到企业微信气泡中。
+最常用的模式。通过 `chan Chunk` 输出内容，SDK 会自动建立流式会话，将内容逐字推送到企业微信气泡中。
 
 **代码示例:** 
 ```go
-func Run(cmd *cobra.Command, args []string) {
-    cmd.Println("正在查询数据...") // 第一帧
-    // ... 耗时操作
-    cmd.Println("查询完成: 100条") // 后续帧
-}
+handler := wecom.HandlerFunc(func(ctx wecom.Context) <-chan wecom.Chunk {
+    ch := make(chan wecom.Chunk)
+    go func() {
+        defer close(ch)
+        ch <- wecom.Chunk{Content: "正在查询数据...", IsFinal: false}  // 中间帧
+        // ... 耗时操作
+        ch <- wecom.Chunk{Content: "查询完成: 100条", IsFinal: true}  // 最终帧
+    }()
+    return ch
+})
 ```
 
 ### 2.2 模式二：静默执行 (No Response)
-当你不希望 Bot 在对话框产生任何气泡（连"正在生成"的转圈都不想要），而是想完全依赖**主动推送**（如发一张独立的卡片）时，使用此模式。
+当你不希望 Bot 在对话框产生流式气泡，而是想完全依赖**主动推送**（如发一张独立的卡片）时，使用此模式。
 
 **代码示例:** 
 ```go
-func Run(cmd *cobra.Command, args []string) {
-    ctx := command.FromContext(cmd.Context())
+handler := wecom.HandlerFunc(func(ctx wecom.Context) <-chan wecom.Chunk {
+    // 主动推送 Markdown 消息
+    _ = ctx.Bot.ResponseMarkdown(ctx.ResponseURL, "# 异步通知\n任务已后台开始")
     
-    // 1. 标记静默：Bot 将直接返回 HTTP 200 OK 空包
-    ctx.SendNoResponse()
-
-    // 2. 主动推送消息 (异步)
-    // ResponseMarkdown 会自动使用 RequestSnapshot.ResponseURL
-    _ = ctx.ResponseMarkdown("# 异步通知\n任务已后台开始")
-}
+    // 返回空 channel，不产生流式回复
+    ch := make(chan wecom.Chunk)
+    close(ch)
+    return ch
+})
 ```
 
-### 2.3 模式三：非流式对象回复 (Payload)
-当你需要同步回复一个特殊对象（如一张卡片，或者更新卡片状态）而不是文本流时，使用此模式。这通常用于`enter_chat`欢迎语或按钮点击回调。
+### 2.3 模式三：非流式对象回复 (模板卡片)
+当你需要同步回复模板卡片时（如 `enter_chat` 欢迎语或按钮交互回调），通过主动回复接口发送。
 
 **代码示例:** 
 ```go
-func Run(cmd *cobra.Command, args []string) {
-    ctx := command.FromContext(cmd.Context())
-    
-    // 构造更新消息 (例如点击按钮后将按钮变为文本)
-    msg := &wecom.UpdateTemplateCardMessage{
-        ResponseType: "update_template_card",
-        TemplateCard: &wecom.TemplateCard{
-            TaskID: ctx.RequestSnapshot.Metadata["task_id"],
-            MainTitle: &wecom.MainTitle{Title: "已批准"},
-        },
+handler := wecom.HandlerFunc(func(ctx wecom.Context) <-chan wecom.Chunk {
+    // 构造模板卡片
+    card := &wecom.TemplateCard{
+        TaskID:    "task_001",
+        MainTitle: &wecom.MainTitle{Title: "欢迎使用"},
     }
     
-    // 设置 Payload：Bot 将序列化此对象并加密返回
-    ctx.SendPayload(msg)
-}
+    // 通过主动回复发送卡片
+    _ = ctx.Bot.ResponseTemplateCard(ctx.ResponseURL, card)
+    
+    ch := make(chan wecom.Chunk)
+    close(ch)
+    return ch
+})
 ```
 
 ---
 
 ## 3. 事件与路由机制
 
-为了简化开发，系统底层会将 `template_card_event` 的 `event_key` 转换为**文本指令**；`enter_chat` 仅透传 `event_type` 到 Metadata；`feedback_event` 默认短路返回（不进入 pipeline）。
+Bot 收到的报文通过 `Message` 结构体解析。开发者可根据 `MsgType` 和 `EventType` 字段进行分流处理。
 
 ### 3.1 事件映射表
 
-| 原始事件类型 (`event_type`) | 转换逻辑 | 路由结果 (Text) | 推荐实现方式 |
-| :--- | :--- | :--- | :--- |
-| `enter_chat` (进入会话) | 不做文本映射 | (空) | 在上层根据 `Metadata["event_type"]` 自行处理 |
-| `template_card_event` (卡片交互) | 取 `event_key` | `event_key` 的值 | 将按钮 Key 设为 `/cmd` 形式，直接触发对应 Command |
-| `feedback_event` (用户反馈) | 默认短路返回 | (空) | 需在 Bot 层改造或自定义入口处理 |
+| 原始事件类型 (`event_type`) | Bot 推荐处理方式 |
+| :--- | :--- |
+| `enter_chat` (进入会话) | 根据 `Message.EventType` 判断，回复欢迎卡片 |
+| `template_card_event` (卡片交互) | 取 `EventKey` 执行对应业务逻辑 |
+| `feedback_event` (用户反馈) | 记录反馈数据，返回空包即可 |
 
 ## 4. 开发场景示例
 
 ### 场景 A: 实现欢迎语
-1.  注册命令 `Use: "welcome"`。
-2.  在平台接入层或路由层将 `event_type=enter_chat` 映射为 `/welcome`。
-3.  在 `Run` 中使用 `ctx.SendPayload(&wecom.TemplateCardMessage{...})` 返回一张欢迎卡片。
+1.  在 Handler 中判断 `ctx.Message.MsgType == "event"` 且 `ctx.Message.EventType == "enter_chat"`。
+2.  使用 `ctx.Bot.ResponseTemplateCard(ctx.ResponseURL, card)` 回复欢迎卡片。
+3.  返回空 channel（不产生流式回复）。
 
 ### 场景 B: 卡片按钮交互
-1.  发送一张包含按钮的卡片，按钮 Key 设为 `/approve order_123`。
+1.  发送一张包含按钮的卡片，按钮 Key 设为 `approve_order_123`。
 2.  用户点击按钮，企业微信推送 `template_card_event`。
-3.  适配器将其转换为文本 `/approve order_123`。
-4.  系统路由至 `approve` 命令。
-5.  `approve` 命令使用 `ctx.SendPayload(&wecom.UpdateTemplateCardMessage{...})` 更新原卡片状态。
+3.  Handler 根据 `EventKey` 执行业务逻辑。
+4.  通过主动回复更新原卡片状态。
 
-> 更多信息请参考 `docs/appendix/wecom-official/index.md`。
+> 更多信息请参考 `docs/wecom_ai_bot/` 中的官方资料。

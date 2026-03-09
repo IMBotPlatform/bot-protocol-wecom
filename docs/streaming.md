@@ -18,7 +18,7 @@
                                          HTTP Request (Callback)
                                                     |
                                                     v
-                                          [ pkg/platform/wecom/bot.go ]
+                                          [ pkg/wecom/bot.go ]
                                               ServeHTTP
                                                     |
 +-------------------------------------------------------+------------------------------------------+
@@ -27,33 +27,28 @@
 |                                                       |                                          |
 | 1. initial()                                          | 1. refresh()                             |
 |    |                                                  |    |                                     |
-|    +--> [StreamManager] Create Stream (StreamID)      |    +--> [StreamManager] getLatestChunk(StreamID) |
-|    |                                                  |         (阻塞等待，直到 Timeout 或有数据)     |
-|    +--> 启动 Goroutine: doPipeline() -----------------|--------+                                 |
+|    +--> [StreamManager] createOrGet(msg)               |    +--> [StreamManager] getLatestChunk(ID)|
+|    |    创建 Stream，生成 StreamID                      |         (阻塞等待，直到 Timeout 或有数据)     |
+|    |                                                  |         (执行 Drain：跳过中间状态)           |
+|    +--> 启动 Goroutine: doHandler() -----------------|--------+                                 |
 |    |      |                                           |        |                                 |
 |    |      v                                           |        v                                 |
-|    |    [ pkg/botcore/chain.go ]                      |    (获取到 Chunk)                          |
-|    |      Trigger()                                   |        |                                 |
-|    |      /      \                                    |    +---+---+                             |
-|    |     /        \                                   |    | IsFinal?                            |
-|    |   (Command)  (AI Chat)                           |    +---+---+                             |
-|    |     /          \                                 |      |   |                               |
-|    |    v            v                                |      |   +-- Yes --> [markFinished]      |
-|    | [Manager]    [AIService]                         |      |                                   |
-|    |    |            |                                |      v                                   |
-|    |    | (Run)      | (Stream)                       |  [Encrypt Reply]                         |
-|    |    v            v                                |      |                                   |
-|    | [StreamWriter]  |                                |      v                                   |
-|    | (io.Writer)     |                                |  HTTP Response                           |
-|    |    |            |                                |  (返回给企业微信)                           |
-|    +----+------------+                                |                                          |
-|         |                                             |                                          |
+|    |    [ Handler 接口 ]                               |    (获取到 Chunk)                          |
+|    |      handler.Handle(ctx)                         |        |                                 |
+|    |      返回 <-chan Chunk                            |    +---+---+                             |
+|    |         |                                        |    | IsFinal?                            |
+|    |         | (chan Chunk 输出)                       |    +---+---+                             |
+|    |         v                                        |      |   |                               |
+|    |    [doHandler]                                   |      |   +-- Yes --> [markFinished]      |
+|    |    消费 Chunk 并调用 publish()                    |      |                                   |
+|    +----+                                             |      v                                   |
+|         |                                             |  [Encrypt Reply]                         |
+|         v                                             |      |                                   |
+|    chan Chunk --> StreamManager.publish()              |      v                                   |
+|         |                                             |  HTTP Response                           |
+|         | (叠加到 LastChunk，入队全量快照)               |  (返回给企业微信)                           |
 |         v                                             |                                          |
-|    chan StreamChunk                                   |                                          |
-|         |                                             |                                          |
-|         | <---- (drainPipeline 消费)                   |                                          |
-|         v                                             |                                          |
-|    [StreamManager] publish(Chunk) --------------------+                                          |
+|    [StreamManager] queue                              |                                          |
 |                                                       |                                          |
 | 2. 返回空包 (ACK)                                      |                                          |
 |    告诉企业微信 "已收到，请开始轮询"                       |                                          |
@@ -64,21 +59,21 @@
 
 1.  **接收消息 (`initial`)**:
     *   用户发送消息，Bot 收到 HTTP POST。
-    *   `initial` 方法创建会话 (`Stream`)，生成唯一 `StreamID` 并写入 `RequestSnapshot.ID`。
-    *   **异步启动**业务逻辑（`doPipeline`），开始生产数据。
-    *   主线程立即返回一个空的流式响应包，通知企业微信："已进入流式模式，请开始轮询"。
+    *   `initial` 方法调用 `StreamManager.createOrGet()` 创建会话（`Stream`），生成唯一 `StreamID`。
+    *   **异步启动**业务逻辑（`doHandler`），开始消费 Handler 输出的 `Chunk`。
+    *   主线程立即返回一个空的流式响应包，通知企业微信：「已进入流式模式，请开始轮询」。
 
-2.  **业务处理 (`Pipeline`)**:
-    *   `Router` 根据前缀分发任务（AI 对话或命令执行）。
-    *   **Command**: 标准输出被劫持到 `StreamWriter`。
-    *   **AI**: 大模型生成的 Token 被推送到 Channel。
-    *   所有输出统一封装为 `StreamChunk`（含 `Content` 和 `IsFinal`）。
+2.  **业务处理 (`Handler`)**:
+    *   `Handler.Handle(ctx)` 返回 `<-chan Chunk`。
+    *   业务层通过向 channel 发送 `Chunk{Content, IsFinal}` 来输出内容。
+    *   最后一个 Chunk 需设置 `IsFinal: true`。
 
 3.  **数据中转 (`StreamManager`)**:
-    *   `doPipeline` 从业务层读取增量片段，调用 `publish` 存入 `StreamManager`。
+    *   `doHandler` 从 channel 读取 `Chunk`，调用 `StreamManager.publish()` 存入会话。
+    *   `publish` 执行增量叠加，将完整内容快照入队。
 
 4.  **流式回传 (`refresh`)**:
-    *   企业微信收到首包后，发起 `MsgType="stream"` 的请求。
+    *   企业微信收到首包后，发起 `MsgType="stream"` 的刷新请求。
     *   Bot 调用 `getLatestChunk` **阻塞等待**新数据。
     *   一旦有数据（或超时），立即返回当前**最新的全量内容**。
     *   循环此过程，直到返回 `IsFinal=true`。
@@ -94,8 +89,8 @@
 |                                          数据流叠加原理                                                        |
 +---------------------------------------------------------------------------------------------------------------+
 
-[1. 生产者: Pipeline]             [2. 状态管理: StreamManager]                    [3. 消费者: HTTP refresh]
-(Command / AI Service)            (pkg/platform/wecom/stream.go)                 (pkg/platform/wecom/bot.go)
+[1. 生产者: Handler]              [2. 状态管理: StreamManager]                    [3. 消费者: HTTP refresh]
+(业务层 chan Chunk)                (pkg/wecom/stream.go)                          (pkg/wecom/bot.go)
 
    Generate Incremental               Maintain Full State                            Poll & Response
          Chunks                           (Accumulation)                               (Snapshot)
@@ -104,59 +99,59 @@
    +-------v-------+                 +----------v-----------+                                |
    | Chunk 1: "H"  | --------------> | Stream.LastChunk     |                                |
    +---------------+    (publish)    | Now: "H"             |                                |
-                                     |                      |                                |
-                                     | -> Enqueue Full: "H" |                                |
-                                     +----------+-----------+                                |
-                                                |                                  +---------v---------+
-                                                | (Queue: ["H"])                   | WeCom Request #1  |
-                                                |                                  | MsgType: stream   |
-                                                v                                  +---------+---------+
-                                     +----------+-----------+                                |
+                                      |                      |                                |
+                                      | -> Enqueue Full: "H" |                                |
+                                      +----------+-----------+                                |
+                                                 |                                  +---------v---------+
+                                                 | (Queue: ["H"])                   | WeCom Request #1  |
+                                                 |                                  | MsgType: stream   |
+                                                 v                                  +---------+---------+
+                                      +----------+-----------+                                |
    +-------v-------+                 | Stream.LastChunk     | <---- (getLatestChunk) --------+
    | Chunk 2: "el" | --------------> | Now: "Hel"           |       1. Take "H"              |
    +---------------+    (publish)    |                      |       2. Return "H"            v
-                                     | -> Enqueue Full:     |                           [ Response ]
-                                     |    "Hel"             |                           Content: "H"
-                                     +----------+-----------+                           IsFinal: false
-                                                |
-                                                | (Queue: ["Hel"])
-                                                |
-                                                v
-                                     +----------+-----------+
+                                      | -> Enqueue Full:     |                           [ Response ]
+                                      |    "Hel"             |                           Content: "H"
+                                      +----------+-----------+                           IsFinal: false
+                                                 |
+                                                 | (Queue: ["Hel"])
+                                                 |
+                                                 v
+                                      +----------+-----------+
    +-------v-------+                 | Stream.LastChunk     |
    | Chunk 3: "lo" | --------------> | Now: "Hello"         |
    +---------------+    (publish)    |                      |
-                                     | -> Enqueue Full:     |
-                                     |    "Hello"           |
-                                     +----------+-----------+
-                                                |
-                                                | (Queue: ["Hel", "Hello"])
-                                                |
-                                                |                                  +---------v---------+
-                                                |                                  | WeCom Request #2  |
-                                                |                                  | MsgType: stream   |
-                                                v                                  +---------+---------+
-                                     +----------+-----------+                                |
+                                      | -> Enqueue Full:     |
+                                      |    "Hello"           |
+                                      +----------+-----------+
+                                                 |
+                                                 | (Queue: ["Hel", "Hello"])
+                                                 |
+                                                 |                                  +---------v---------+
+                                                 |                                  | WeCom Request #2  |
+                                                 |                                  | MsgType: stream   |
+                                                 v                                  +---------+---------+
+                                      +----------+-----------+                                |
    +-------v-------+                 | Stream.LastChunk     | <---- (getLatestChunk) --------+
    | Chunk 4: "!"  | --------------> | Now: "Hello!"        |       1. Take "Hel"            |
    | IsFinal: true |    (publish)    |                      |       2. Take "Hello" (Skip)   |
    +---------------+                 | -> Enqueue Full:     |       3. Return "Hello"        |
-                                     |    "Hello!"          |          (Drain Queue)         v
-                                     +----------+-----------+                           [ Response ]
-                                                |                                       Content: "Hello"
-                                                | (Queue: ["Hello!"])                   IsFinal: false *
-                                                |                                       (*注: 还没取到!)
-                                                v
-                                                                                   +---------v---------+
-                                                                                   | WeCom Request #3  |
-                                                                                   +---------+---------+
-                                                                                             |
-                                                                    (getLatestChunk) <-------+
-                                                                    1. Take "Hello!"         |
-                                                                    2. IsFinal=true          v
-                                                                                        [ Response ]
-                                                                                        Content: "Hello!"
-                                                                                        IsFinal: true
+                                      |    "Hello!"          |          (Drain Queue)         v
+                                      +----------+-----------+                           [ Response ]
+                                                 |                                       Content: "Hello"
+                                                 | (Queue: ["Hello!"])                   IsFinal: false *
+                                                 |                                       (*注: 还没取到!)
+                                                 v
+                                                                                    +---------v---------+
+                                                                                    | WeCom Request #3  |
+                                                                                    +---------+---------+
+                                                                                              |
+                                                                     (getLatestChunk) <-------+
+                                                                     1. Take "Hello!"         |
+                                                                     2. IsFinal=true          v
+                                                                                         [ Response ]
+                                                                                         Content: "Hello!"
+                                                                                         IsFinal: true
 ```
 
 ### 2.2 关键机制说明
@@ -177,17 +172,23 @@
 
 ## 3. 关键组件代码映射
 
-*   **`pkg/platform/wecom/bot.go`**:
-    *   `initial()`: 处理首包，启动 Pipeline。
+*   **`pkg/wecom/bot.go`**:
+    *   `ServeHTTP()`: HTTP Handler 入口，根据请求方法分发。
+    *   `handlePost()`: 解密消息体，按 `MsgType` 路由到 `initial()` 或 `refresh()`。
+    *   `initial()`: 处理首包，创建 Stream，异步启动 `doHandler()`。
     *   `refresh()`: 处理轮询，调用 `StreamManager.getLatestChunk()`。
-*   **`pkg/platform/wecom/stream.go`**:
-    *   `Stream`: 存储 `LastChunk` 和 `queue`。
-    *   `publish()`: 叠加并入队完整内容快照。
-    *   `getLatestChunk()`: 执行队列排干（Drain）逻辑。
-*   **`pkg/botcore/chain.go`**:
-    *   `Chain` + `AddRoute`：基于前缀路由到命令或 AI。
-    *   `MatchPrefix("/")`：匹配命令前缀，未匹配走默认处理。
-*   **`pkg/command/io.go`**:
-    *   `StreamWriter`: 适配 `io.Writer`，让普通 CLI 工具的输出也能无缝转化为流式片段。
+    *   `doHandler()`: 消费 Handler 输出的 `chan Chunk`，调用 `publish()` 发布数据。
+*   **`pkg/wecom/stream.go`**:
+    *   `Stream`: 存储 `LastChunk` 和 `queue`（`chan Chunk`）。
+    *   `StreamManager.createOrGet()`: 按消息 ID 创建或复用会话。
+    *   `StreamManager.publish()`: 叠加并入队完整内容快照。
+    *   `StreamManager.getLatestChunk()`: 执行队列排干（Drain）逻辑。
+    *   `StreamManager.cleanup()`: 定期清理过期会话。
+*   **`pkg/wecom/handler.go`**:
+    *   `Handler`: 业务处理器接口，`Handle(ctx Context) <-chan Chunk`。
+    *   `HandlerFunc`: 函数适配器，方便快速实现 Handler。
+*   **`pkg/wecom/message.go`**:
+    *   `Message`: 企业微信回调消息的完整结构体。
+    *   `Chunk`: 流式片段，包含 `Content` 和 `IsFinal`。
 
-> 更多信息请参考 `docs/appendix/wecom-official/index.md`。
+> 更多信息请参考 `docs/wecom_ai_bot/` 中的官方资料。
