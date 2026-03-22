@@ -24,6 +24,7 @@ DOC_FETCH_URL = (
     "?lang=zh_CN&ajax=1&f=json&random="
 )
 FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.S)
+SOURCE_PATH_ID_RE = re.compile(r"/document/path/(\d+)")
 HEADING_RE = re.compile(r"^(\s*)(#+)(.*)$")
 LIST_RE = re.compile(r"^\s*(?:[-+*]|\d+\.)\s+")
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
@@ -69,13 +70,13 @@ def parse_frontmatter(text: str) -> Tuple[Optional[str], Optional[Dict[str, str]
     return fm_raw, meta, body
 
 
-def fetch_content_md(
+def fetch_doc_payload(
     doc_id: str,
     source_url: str,
     cookie: Optional[str],
     timeout: int,
-) -> Tuple[Optional[str], Optional[str]]:
-    """Fetch content_md from the docFetch endpoint.
+) -> Tuple[Optional[Dict[str, object]], Optional[str]]:
+    """Fetch the raw payload from the docFetch endpoint.
 
     Args:
         doc_id: Document id to request.
@@ -84,7 +85,8 @@ def fetch_content_md(
         timeout: Curl timeout in seconds.
 
     Returns:
-        A tuple of (content_md, error_message). If error occurs, content_md is None.
+        A tuple of (payload_dict, error_message). If error occurs, payload_dict is
+        None.
     """
 
     url = DOC_FETCH_URL + str(int(time.time() * 1000))
@@ -129,11 +131,209 @@ def fetch_content_md(
     if not isinstance(data, dict):
         return None, "missing data"
 
-    content_md = data.get("content_md")
-    if not content_md:
-        return None, "missing content_md"
+    return payload, None
 
-    return content_md, None
+
+def fetch_doc_page_html(
+    source_url: str,
+    timeout: int,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Fetch the document page HTML for doc_id resolution.
+
+    Args:
+        source_url: Original document URL.
+        timeout: Curl timeout in seconds.
+
+    Returns:
+        A tuple of (html_text, error_message). If error occurs, html_text is None.
+    """
+
+    cmd = [
+        "curl",
+        "-L",
+        "-s",
+        "--max-time",
+        str(timeout),
+        source_url,
+        "-H",
+        f"user-agent: {USER_AGENT}",
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        return None, f"page curl failed: {result.stderr.strip() or result.returncode}"
+    if not result.stdout.strip():
+        return None, "empty page html"
+
+    return result.stdout, None
+
+
+def extract_json_array_after_marker(
+    text: str,
+    marker: str,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Extract a JSON array that appears after the given marker.
+
+    Args:
+        text: Source text containing a JavaScript assignment.
+        marker: Marker text that appears before the target JSON array.
+
+    Returns:
+        A tuple of (json_array_text, error_message). If not found, json_array_text
+        is None.
+    """
+
+    marker_idx = text.find(marker)
+    if marker_idx == -1:
+        return None, f"missing marker: {marker}"
+
+    start_idx = text.find("[", marker_idx)
+    if start_idx == -1:
+        return None, f"missing array start after marker: {marker}"
+
+    depth = 0
+    in_string = False
+    escape = False
+    quote_char = ""
+
+    for idx in range(start_idx, len(text)):
+        ch = text[idx]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == quote_char:
+                in_string = False
+            continue
+
+        if ch in ("\"", "'"):
+            in_string = True
+            quote_char = ch
+            continue
+
+        if ch == "[":
+            depth += 1
+            continue
+        if ch == "]":
+            depth -= 1
+            if depth == 0:
+                return text[start_idx : idx + 1], None
+
+    return None, f"unterminated array after marker: {marker}"
+
+
+def resolve_real_doc_id_from_source_url(
+    source_url: str,
+    timeout: int,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Resolve the real doc_id from the document page metadata.
+
+    Some pages use `/document/path/<path_id>` URLs where `path_id` is not the real
+    `doc_id` accepted by `docFetch/fetchCnt`. This helper resolves the real doc_id
+    from the page's embedded `window.categories` data.
+
+    Args:
+        source_url: Original document URL.
+        timeout: Curl timeout in seconds.
+
+    Returns:
+        A tuple of (resolved_doc_id, error_message). If not resolved,
+        resolved_doc_id is None.
+    """
+
+    path_match = SOURCE_PATH_ID_RE.search(source_url)
+    if not path_match:
+        return None, "missing /document/path/<id> in source_url"
+
+    page_html, error = fetch_doc_page_html(source_url, timeout)
+    if error:
+        return None, error
+
+    categories_json, error = extract_json_array_after_marker(
+        page_html,
+        "window.categories",
+    )
+    if error:
+        return None, error
+
+    try:
+        categories = json.loads(categories_json)
+    except json.JSONDecodeError as exc:
+        return None, f"window.categories json decode failed: {exc}"
+
+    path_id = int(path_match.group(1))
+    for item in categories:
+        if not isinstance(item, dict):
+            continue
+        item_path_id = item.get("category_id", item.get("id"))
+        item_doc_id = item.get("doc_id")
+        if item_path_id != path_id or not isinstance(item_doc_id, int):
+            continue
+        if item_doc_id > 0:
+            return str(item_doc_id), None
+
+    return None, f"doc_id not found for path_id={path_id}"
+
+
+def fetch_content_md(
+    doc_id: str,
+    source_url: str,
+    cookie: Optional[str],
+    timeout: int,
+) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """Fetch content_md from the docFetch endpoint.
+
+    Args:
+        doc_id: Document id to request.
+        source_url: Original document URL for the Referer header.
+        cookie: Optional cookie string passed to curl.
+        timeout: Curl timeout in seconds.
+
+    Returns:
+        A tuple of (content_md, error_message, resolved_doc_id). If error occurs,
+        content_md is None. When doc_id fallback succeeds, resolved_doc_id contains
+        the effective id used for the successful retry.
+    """
+
+    payload, error = fetch_doc_payload(doc_id, source_url, cookie, timeout)
+    if error:
+        return None, error, None
+
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return None, "missing data", None
+
+    content_md = data.get("content_md")
+    if isinstance(content_md, str) and content_md:
+        return content_md, None, doc_id
+
+    # Some documents expose a path id in source_url while docFetch expects the
+    # real doc_id embedded in the page metadata, so retry with the resolved id.
+    resolved_doc_id, resolve_error = resolve_real_doc_id_from_source_url(
+        source_url,
+        timeout,
+    )
+    if resolve_error or not resolved_doc_id or resolved_doc_id == doc_id:
+        return None, "missing content_md", None
+
+    retry_payload, retry_error = fetch_doc_payload(
+        resolved_doc_id,
+        source_url,
+        cookie,
+        timeout,
+    )
+    if retry_error:
+        return None, retry_error, resolved_doc_id
+
+    retry_data = retry_payload.get("data")
+    if not isinstance(retry_data, dict):
+        return None, "missing data after doc_id retry", resolved_doc_id
+
+    retry_content_md = retry_data.get("content_md")
+    if not isinstance(retry_content_md, str) or not retry_content_md:
+        return None, "missing content_md after doc_id retry", resolved_doc_id
+
+    return retry_content_md, None, resolved_doc_id
 
 
 def normalize_heading_line(line: str) -> str:
@@ -371,7 +571,12 @@ def update_markdown(
         return False, f"missing source_url for {doc_name}", None
 
     # Fetch latest markdown content from WeCom docs.
-    content_md, error = fetch_content_md(doc_id, source_url, cookie, timeout)
+    content_md, error, effective_doc_id = fetch_content_md(
+        doc_id,
+        source_url,
+        cookie,
+        timeout,
+    )
     if error:
         return False, f"{doc_name}: {error}", None
 
@@ -389,11 +594,14 @@ def update_markdown(
 
     formatted = format_markdown(content_md)
     new_text = fm_raw.rstrip("\n") + "\n\n" + formatted.rstrip() + "\n"
+    message = f"{doc_name}: {'dry-run' if dry_run else 'updated'} (len={len(content_md)})"
+    if effective_doc_id and effective_doc_id != doc_id:
+        message += f" [doc_id {doc_id}->{effective_doc_id}]"
     if dry_run:
-        return True, f"{doc_name}: dry-run (len={len(content_md)})", change_output
+        return True, message, change_output
 
     path.write_text(new_text, encoding="utf-8")
-    return True, f"{doc_name}: updated (len={len(content_md)})", change_output
+    return True, message, change_output
 
 
 def collect_targets(target_dir: Path, target_file: Optional[Path]) -> list[Path]:
