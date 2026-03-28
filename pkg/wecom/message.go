@@ -18,11 +18,12 @@ type Message struct {
 	ChatType    string             `json:"chattype"`              // chat 类型（single/group）
 	From        MessageSender      `json:"from"`                  // 触发者信息
 	ResponseURL string             `json:"response_url"`          // 异步回复 URL (部分事件有)
-	MsgType     string             `json:"msgtype"`               // 消息类型: text, image, voice, file, mixed, stream, event
+	MsgType     string             `json:"msgtype"`               // 消息类型: text, image, voice, file, video, mixed, stream, event
 	Text        *TextPayload       `json:"text,omitempty"`        // 文本消息内容（MsgType=text）
 	Image       *ImagePayload      `json:"image,omitempty"`       // 图片消息内容（MsgType=image）
 	Voice       *VoicePayload      `json:"voice,omitempty"`       // 语音消息内容（MsgType=voice）
 	File        *FilePayload       `json:"file,omitempty"`        // 文件消息内容（MsgType=file）
+	Video       *VideoPayload      `json:"video,omitempty"`       // 视频消息内容（MsgType=video）
 	Mixed       *MixedPayload      `json:"mixed,omitempty"`       // 图文混排内容（MsgType=mixed）
 	Stream      *StreamPayload     `json:"stream,omitempty"`      // 流式消息内容（MsgType=stream）
 	Quote       *QuotePayload      `json:"quote,omitempty"`       // 引用消息内容（MsgType=quote）
@@ -64,6 +65,12 @@ type FilePayload struct {
 	AESKey string `json:"aeskey,omitempty"` // 长连接模式下返回的资源解密密钥
 }
 
+// VideoPayload 为视频消息内容。
+type VideoPayload struct {
+	URL    string `json:"url"`              // 视频下载地址
+	AESKey string `json:"aeskey,omitempty"` // 长连接模式下返回的资源解密密钥
+}
+
 // MixedPayload 表示图文混排消息。
 type MixedPayload struct {
 	Items []MixedItem `json:"msg_item"` // 图文混排子消息列表
@@ -92,6 +99,7 @@ type QuotePayload struct {
 	Mixed   *MixedPayload `json:"mixed,omitempty"` // 引用图文混排
 	Voice   *VoicePayload `json:"voice,omitempty"` // 引用语音
 	File    *FilePayload  `json:"file,omitempty"`  // 引用文件
+	Video   *VideoPayload `json:"video,omitempty"` // 引用视频
 }
 
 // EventPayload 事件结构体

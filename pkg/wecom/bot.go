@@ -468,11 +468,14 @@ func (b *Bot) DecryptDownloadedFile(cipherData []byte) ([]byte, error) {
 }
 
 // decryptMessageImages 自动下载并解密消息中所有图片 URL，将解密后的数据填入 ImagePayload.Data。
-// 企业微信回调的 image.url 返回的是 AES-CBC 加密密文，需要下载并解密后才能作为图片使用。
+// 企业微信回调的 image.url 返回的是 AES-CBC 加密密文，需要解密后才能作为图片使用。
 // 此方法会处理：
-//   - MsgType=image 的顶层图片
-//   - MsgType=mixed 中的 image 子消息
+//   - 顶层 image
+//   - mixed 中的 image 子消息
+//   - quote.image
+//   - quote.mixed 中的 image 子消息
 //
+// 文件与视频保留为延迟下载/解密模式，避免协议层在回调阶段拉取大资源。
 // 解密失败时会静默忽略（不中断流程）。
 func (b *Bot) decryptMessageImages(msg *Message) {
 	if msg == nil || b == nil {
@@ -480,15 +483,29 @@ func (b *Bot) decryptMessageImages(msg *Message) {
 	}
 
 	// 处理顶层 image 消息
-	if msg.MsgType == "image" && msg.Image != nil {
+	if msg.Image != nil {
 		b.decryptImagePayload(msg.Image)
 	}
 
 	// 处理 mixed 消息中的 image 子消息
-	if msg.MsgType == "mixed" && msg.Mixed != nil {
+	if msg.Mixed != nil {
 		for i := range msg.Mixed.Items {
 			if msg.Mixed.Items[i].MsgType == "image" && msg.Mixed.Items[i].Image != nil {
 				b.decryptImagePayload(msg.Mixed.Items[i].Image)
+			}
+		}
+	}
+
+	// 处理引用消息中的图片
+	if msg.Quote != nil {
+		if msg.Quote.Image != nil {
+			b.decryptImagePayload(msg.Quote.Image)
+		}
+		if msg.Quote.Mixed != nil {
+			for i := range msg.Quote.Mixed.Items {
+				if msg.Quote.Mixed.Items[i].MsgType == "image" && msg.Quote.Mixed.Items[i].Image != nil {
+					b.decryptImagePayload(msg.Quote.Mixed.Items[i].Image)
+				}
 			}
 		}
 	}

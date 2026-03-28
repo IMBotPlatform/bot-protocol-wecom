@@ -82,3 +82,35 @@ func TestBuildStreamReplyWithMsgItems_MsgItemOnlyOnFinish(t *testing.T) {
 		t.Fatalf("msg_item should not be affected by caller mutation, got %s", reply2.Stream.MsgItem[0].MsgType)
 	}
 }
+
+func TestParseMessageWithQuoteVideo(t *testing.T) {
+	raw := []byte(`{
+		"msgid":"MSGID",
+		"msgtype":"text",
+		"text":{"content":"hello"},
+		"quote":{
+			"msgtype":"video",
+			"video":{"url":"https://example.com/video","aeskey":"AESKEY"}
+		}
+	}`)
+
+	msg, err := parseMessage(raw)
+	if err != nil {
+		t.Fatalf("parse message: %v", err)
+	}
+	if msg.Quote == nil {
+		t.Fatal("quote should not be nil")
+	}
+	if msg.Quote.MsgType != "video" {
+		t.Fatalf("unexpected quote msgtype: %s", msg.Quote.MsgType)
+	}
+	if msg.Quote.Video == nil {
+		t.Fatal("quote video should not be nil")
+	}
+	if msg.Quote.Video.URL != "https://example.com/video" {
+		t.Fatalf("unexpected quote video url: %s", msg.Quote.Video.URL)
+	}
+	if msg.Quote.Video.AESKey != "AESKEY" {
+		t.Fatalf("unexpected quote video aeskey: %s", msg.Quote.Video.AESKey)
+	}
+}

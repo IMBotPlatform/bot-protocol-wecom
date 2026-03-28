@@ -218,6 +218,25 @@ func TestBotDecryptDownloadedFileRoundTrip(t *testing.T) {
 	}
 }
 
+func TestDecryptDownloadedFileWithAESKeyRoundTrip(t *testing.T) {
+	rawKey := bytes.Repeat([]byte{0x37}, 32)
+	encodedKey := strings.TrimRight(base64.StdEncoding.EncodeToString(rawKey), "=")
+
+	plain := bytes.Repeat([]byte("resource-aes-key-"), 5)
+	cipherData, err := encryptDownloadedFileForTest(rawKey, plain)
+	if err != nil {
+		t.Fatalf("encrypt downloaded file: %v", err)
+	}
+
+	got, err := DecryptDownloadedFileWithAESKey(encodedKey, cipherData)
+	if err != nil {
+		t.Fatalf("decrypt downloaded file with aeskey: %v", err)
+	}
+	if !bytes.Equal(got, plain) {
+		t.Fatalf("round-trip mismatch: got=%q want=%q", string(got), string(plain))
+	}
+}
+
 func TestCryptDecryptDownloadedFileErrors(t *testing.T) {
 	t.Run("nil receiver", func(t *testing.T) {
 		var crypt *Crypt
@@ -276,6 +295,14 @@ func TestBotDecryptDownloadedFileErrors(t *testing.T) {
 		bot := &Bot{}
 		_, err := bot.DecryptDownloadedFile(make([]byte, 16))
 		if err == nil || !strings.Contains(err.Error(), "bot crypto is nil") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("invalid resource aeskey", func(t *testing.T) {
+		shortKey := strings.TrimRight(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x11}, 31)), "=")
+		_, err := DecryptDownloadedFileWithAESKey(shortKey, make([]byte, 16))
+		if err == nil || !errors.Is(err, ErrInvalidAESKey) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})

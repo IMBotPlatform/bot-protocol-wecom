@@ -277,22 +277,43 @@ func (c *Crypt) DecryptDownloadedFile(cipherData []byte) ([]byte, error) {
 	if c == nil {
 		return nil, errors.New("crypt is nil")
 	}
+	return decryptDownloadedFileWithKey(c.aesKey, cipherData)
+}
+
+// DecryptDownloadedFileWithAESKey 使用资源级 aeskey 解密下载到的二进制密文数据。
+// Parameters:
+//   - encodedAESKey: 企业微信返回的资源 aeskey（43 字节 Base64 编码串）
+//   - cipherData: 下载接口返回的密文字节（非 Base64 字符串）
+//
+// Returns:
+//   - []byte: 解密后的明文字节
+//   - error: 当 aeskey 非法、密文不合法或解密失败时返回错误
+func DecryptDownloadedFileWithAESKey(encodedAESKey string, cipherData []byte) ([]byte, error) {
+	key, err := decodeAESKey(encodedAESKey)
+	if err != nil {
+		return nil, err
+	}
+	return decryptDownloadedFileWithKey(key, cipherData)
+}
+
+// decryptDownloadedFileWithKey 复用企业微信资源下载解密逻辑。
+func decryptDownloadedFileWithKey(aesKey, cipherData []byte) ([]byte, error) {
 	if len(cipherData) == 0 {
 		return nil, errors.New("cipher data is empty")
 	}
-	if len(c.aesKey) != 32 {
-		return nil, fmt.Errorf("%w: got %d, want 32", ErrInvalidAESKey, len(c.aesKey))
+	if len(aesKey) != 32 {
+		return nil, fmt.Errorf("%w: got %d, want 32", ErrInvalidAESKey, len(aesKey))
 	}
 	if len(cipherData)%aes.BlockSize != 0 {
 		return nil, fmt.Errorf("invalid ciphertext length: %d (must be multiple of %d)", len(cipherData), aes.BlockSize)
 	}
 
 	// 构造 AES 块密码器，并使用 AESKey 前 16 字节作为 IV 进行 CBC 解密。
-	block, err := aes.NewCipher(c.aesKey)
+	block, err := aes.NewCipher(aesKey)
 	if err != nil {
 		return nil, err
 	}
-	iv := c.aesKey[:aes.BlockSize]
+	iv := aesKey[:aes.BlockSize]
 	mode := cipher.NewCBCDecrypter(block, iv)
 	plain := make([]byte, len(cipherData))
 	mode.CryptBlocks(plain, cipherData)

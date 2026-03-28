@@ -13,6 +13,7 @@
 | **图片** | `image` | `ImagePayload` | 用户发送的图片 (含 URL，需解密) |
 | **语音** | `voice` | `VoicePayload` | 用户发送的语音 (含转录文本) |
 | **文件** | `file` | `FilePayload` | 用户发送的文件 (含下载 URL，需解密) |
+| **视频** | `video` | `VideoPayload` | 用户发送的视频 (含下载 URL，需解密) |
 | **图文混排** | `mixed` | `MixedPayload` | 包含文本和图片的组合消息 |
 | **引用消息** | (无独立类型) | `QuotePayload` | 嵌套在上述消息中的 `quote` 字段 |
 
