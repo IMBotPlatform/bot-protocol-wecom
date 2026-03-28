@@ -1,0 +1,28 @@
+repo_id: bot-protocol-wecom
+signals:
+  structure:
+    targets:
+      - .harness/generated/module-map.md
+      - .harness/generated/repo-manifest.yaml
+  runtime:
+    targets:
+      - .harness/architecture.md
+      - .harness/generated/dependency-summary.md
+  contract:
+    targets:
+      - .harness/generated/api-index.md
+      - .harness/generated/contract-index.yaml
+      - .harness/domains/wecom-protocol.md
+  boundary:
+    targets:
+      - AGENTS.md
+      - .harness/conventions.md
+
+workspace_escalation:
+  - exported API or schema changed
+  - IMBotCore adapter compatibility changed
+
+update_policy:
+  class_a: direct
+  class_b: incremental
+  class_c: candidate_only

@@ -1,0 +1,17 @@
+validate_commands:
+  - go test ./...
+
+change_type_to_checks:
+  crypto:
+    - go test ./...
+  message_schema:
+    - go test ./...
+  longconn_runtime:
+    - go test ./...
+  example_changes:
+    - go test ./...
+
+ci_jobs: []
+
+release_checks:
+  - verify downstream IMBotCore adapter if exported contracts changed

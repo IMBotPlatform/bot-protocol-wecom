@@ -1,0 +1,26 @@
+repo_id: bot-protocol-wecom
+role: WeCom protocol SDK
+owns:
+  - callback signature verification
+  - message encryption and decryption
+  - passive stream reply structures
+  - long connection request / response runtime
+not_owns:
+  - command routing
+  - product skills
+  - deployment workflow
+entrypoints:
+  - pkg/wecom/bot.go
+  - pkg/wecom/longconn_bot.go
+  - example/echo/main.go
+depends_on:
+  - github.com/gorilla/websocket
+high_risk_areas:
+  - pkg/wecom/crypt.go
+  - pkg/wecom/message.go
+  - pkg/wecom/longconn_bot.go
+read_first:
+  - README.md
+  - .harness/generated/api-index.md
+  - .harness/architecture.md
+base_branch: main

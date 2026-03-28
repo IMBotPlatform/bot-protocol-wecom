@@ -1,0 +1,30 @@
+public_routes:
+  - mode: webhook
+    entrypoint: pkg/wecom/bot.go
+    methods:
+      - GET
+      - POST
+  - mode: websocket
+    entrypoint: pkg/wecom/longconn_bot.go
+
+events:
+  - Chunk
+  - Context
+
+schemas:
+  - Message
+  - EncryptedRequest
+  - EncryptedResponse
+  - TemplateCard
+  - LongConnRequest
+  - LongConnResponse
+
+sdk_facades:
+  - Bot
+  - LongConnBot
+  - Crypt
+
+generated_mirrors: []
+
+downstream_consumers:
+  - IMBotCore/pkg/platform/wecom
