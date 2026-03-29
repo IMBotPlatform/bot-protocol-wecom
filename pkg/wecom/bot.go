@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -520,12 +521,14 @@ func (b *Bot) decryptImagePayload(img *ImagePayload) {
 	// 下载密文
 	cipherData, err := b.downloadURL(img.URL)
 	if err != nil {
+		log.Printf("wecom image download failed: url=%s err=%v", redactURLForLog(img.URL), err)
 		return
 	}
 
 	// 解密
 	plainData, err := b.DecryptDownloadedFile(cipherData)
 	if err != nil {
+		log.Printf("wecom image decrypt failed: url=%s bytes=%d err=%v", redactURLForLog(img.URL), len(cipherData), err)
 		return
 	}
 
@@ -555,4 +558,16 @@ func (b *Bot) downloadURL(url string) ([]byte, error) {
 	}
 
 	return io.ReadAll(resp.Body)
+}
+
+// redactURLForLog 对下载 URL 做截断，避免日志中打印完整签名串。
+func redactURLForLog(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if len(raw) <= 160 {
+		return raw
+	}
+	return raw[:160] + "...(truncated)"
 }
