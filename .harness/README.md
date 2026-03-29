@@ -12,10 +12,13 @@
 
 1. `generated/repo-manifest.yaml`
 2. `generated/module-map.md`
-3. `generated/api-index.md`
-4. `architecture.md`
-5. `domains/wecom-protocol.md`
-6. `runbooks/local-validation.md`
+3. `generated/contract-index.yaml`
+4. `generated/validation-index.yaml`
+5. `evolution-policy.yaml`
+6. `generated/api-index.md`
+7. `architecture.md`
+8. `domains/wecom-protocol.md`
+9. `runbooks/local-validation.md`
 
 ## Evidence Priority
 

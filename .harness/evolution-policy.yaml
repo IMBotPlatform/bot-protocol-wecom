@@ -8,11 +8,13 @@ signals:
     targets:
       - .harness/architecture.md
       - .harness/generated/dependency-summary.md
+      - .harness/runbooks/local-validation.md
   contract:
     targets:
       - .harness/generated/api-index.md
       - .harness/generated/contract-index.yaml
       - .harness/domains/wecom-protocol.md
+      - .harness/glossary.md
   boundary:
     targets:
       - AGENTS.md

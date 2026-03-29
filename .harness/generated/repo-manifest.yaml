@@ -3,6 +3,7 @@ role: WeCom protocol SDK
 owns:
   - callback signature verification
   - message encryption and decryption
+  - downloaded media decryption helpers
   - passive stream reply structures
   - long connection request / response runtime
 not_owns:
@@ -20,7 +21,12 @@ high_risk_areas:
   - pkg/wecom/message.go
   - pkg/wecom/longconn_bot.go
 read_first:
+  - AGENTS.md
   - README.md
+  - .harness/README.md
+  - .harness/generated/module-map.md
+  - .harness/generated/contract-index.yaml
+  - .harness/generated/validation-index.yaml
   - .harness/generated/api-index.md
   - .harness/architecture.md
 base_branch: main

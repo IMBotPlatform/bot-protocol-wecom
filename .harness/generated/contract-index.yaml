@@ -1,30 +1,100 @@
 public_routes:
   - mode: webhook
     entrypoint: pkg/wecom/bot.go
+    callback_path_default: /callback/command
     methods:
       - GET
       - POST
   - mode: websocket
     entrypoint: pkg/wecom/longconn_bot.go
+    receive_commands:
+      - aibot_msg_callback
+      - aibot_event_callback
+    send_commands:
+      - aibot_subscribe
+      - ping
+      - aibot_respond_msg
+      - aibot_respond_welcome_msg
+      - aibot_respond_update_msg
+      - aibot_send_msg
 
 events:
-  - Chunk
-  - Context
+  - name: aibot_msg_callback
+    kind: longconn_callback_command
+    path: pkg/wecom/longconn_message.go
+  - name: aibot_event_callback
+    kind: longconn_callback_command
+    path: pkg/wecom/longconn_message.go
+  - name: enter_chat
+    kind: message_event_type
+    path: pkg/wecom/message.go
+  - name: template_card_event
+    kind: message_event_type
+    path: pkg/wecom/message.go
+  - name: feedback_event
+    kind: message_event_type
+    path: pkg/wecom/message.go
+
+enums:
+  - name: Message.MsgType
+    path: pkg/wecom/message.go
+    values:
+      - text
+      - image
+      - voice
+      - file
+      - video
+      - mixed
+      - stream
+      - event
+  - name: LongConnCommand
+    path: pkg/wecom/longconn_message.go
+    values:
+      - aibot_subscribe
+      - ping
+      - aibot_msg_callback
+      - aibot_event_callback
+      - aibot_respond_welcome_msg
+      - aibot_respond_msg
+      - aibot_respond_update_msg
+      - aibot_send_msg
 
 schemas:
-  - Message
-  - EncryptedRequest
-  - EncryptedResponse
-  - TemplateCard
-  - LongConnRequest
-  - LongConnResponse
+  - name: Message
+    path: pkg/wecom/message.go
+  - name: EncryptedRequest
+    path: pkg/wecom/message.go
+  - name: EncryptedResponse
+    path: pkg/wecom/message.go
+  - name: StreamReply
+    path: pkg/wecom/message.go
+  - name: MixedItem
+    path: pkg/wecom/message.go
+  - name: TemplateCard
+    path: pkg/wecom/template_card.go
+  - name: LongConnRequest
+    path: pkg/wecom/longconn_message.go
+  - name: LongConnResponse
+    path: pkg/wecom/longconn_message.go
+  - name: LongConnPushMessage
+    path: pkg/wecom/longconn_message.go
 
 sdk_facades:
-  - Bot
-  - LongConnBot
-  - Crypt
+  - name: Bot
+    path: pkg/wecom/bot.go
+  - name: LongConnBot
+    path: pkg/wecom/longconn_bot.go
+  - name: Crypt
+    path: pkg/wecom/crypt.go
+  - name: Handler
+    path: pkg/wecom/handler.go
+  - name: BuildStreamReplyWithMsgItems
+    path: pkg/wecom/message.go
 
 generated_mirrors: []
 
 downstream_consumers:
-  - IMBotCore/pkg/platform/wecom
+  - repo: IMBotCore
+    path: pkg/platform/wecom
+  - repo: wechataibot
+    path: internal/media/image_support.go

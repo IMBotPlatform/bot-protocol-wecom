@@ -4,14 +4,19 @@ validate_commands:
 change_type_to_checks:
   crypto:
     - go test ./...
+  downloaded_media_crypto:
+    - go test ./...
   message_schema:
     - go test ./...
-  longconn_runtime:
+  longconn_commands:
     - go test ./...
-  example_changes:
+  config_defaults:
+    - go test ./...
+  example_echo:
     - go test ./...
 
 ci_jobs: []
 
 release_checks:
   - verify downstream IMBotCore adapter if exported contracts changed
+  - review example/echo image decrypt path if image payload or msg_item helpers changed
