@@ -6,8 +6,10 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -48,6 +50,51 @@ func TestCryptEncryptDecryptRoundTrip(t *testing.T) {
 	}
 	if msg.Stream == nil || msg.Stream.ID != "stream-id" {
 		t.Fatalf("unexpected stream payload: %#v", msg.Stream)
+	}
+}
+
+func TestCryptDoesNotLogMessagePlaintext(t *testing.T) {
+	var captured bytes.Buffer
+	previousWriter := log.Writer()
+	previousFlags := log.Flags()
+	log.SetOutput(&captured)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(previousWriter)
+		log.SetFlags(previousFlags)
+	})
+
+	rawKey := bytes.Repeat([]byte{0x31}, 32)
+	encodingKey := strings.TrimRight(base64.StdEncoding.EncodeToString(rawKey), "=")
+	crypt, err := NewCrypt("token", encodingKey, "corp-id")
+	if err != nil {
+		t.Fatalf("create crypt: %v", err)
+	}
+	const requestSecret = "request-plaintext-must-not-be-logged"
+	requestBody, err := json.Marshal(Message{
+		MsgID: "message-id", ChatID: "chat-id", ChatType: "single", MsgType: "text",
+		From: MessageSender{UserID: "user-id", CorpID: "corp-id"},
+		Text: &TextPayload{Content: requestSecret},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	encryptedRequest, err := crypt.Encrypt(requestBody)
+	if err != nil {
+		t.Fatalf("encrypt request: %v", err)
+	}
+	timestamp, nonce := "1700000000", "nonce"
+	requestSignature := CalcSignature("token", timestamp, nonce, encryptedRequest)
+	if _, err := crypt.DecryptMessage(requestSignature, timestamp, nonce, EncryptedRequest{Encrypt: encryptedRequest}); err != nil {
+		t.Fatalf("decrypt request: %v", err)
+	}
+
+	const responseSecret = "response-plaintext-must-not-be-logged"
+	if _, err := crypt.EncryptResponse(BuildStreamReply("stream-id", responseSecret, true), timestamp, nonce); err != nil {
+		t.Fatalf("encrypt response: %v", err)
+	}
+	if output := captured.String(); strings.Contains(output, requestSecret) || strings.Contains(output, responseSecret) || strings.Contains(output, "user-id") {
+		t.Fatalf("crypt operations leaked message plaintext to logs: %q", output)
 	}
 }
 

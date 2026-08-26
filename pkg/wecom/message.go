@@ -224,7 +224,7 @@ type UpdateTemplateCardMessage struct {
 	TemplateCard *TemplateCard `json:"template_card"`     // 模板卡片体
 }
 
-// MarkdownMessage 主动回复 Markdown 消息结构。
+// MarkdownMessage 表示 Markdown 回复或推送消息结构。
 type MarkdownMessage struct {
 	MsgType  string          `json:"msgtype"` // markdown
 	Markdown MarkdownPayload `json:"markdown"`
@@ -234,6 +234,43 @@ type MarkdownMessage struct {
 type MarkdownPayload struct {
 	Content  string        `json:"content"`            // Markdown 文本内容
 	Feedback *FeedbackInfo `json:"feedback,omitempty"` // 可选反馈信息
+}
+
+// MediaMessagePayload 表示使用临时素材 media_id 发送的媒体消息体。
+// 适用于文件、图片和语音消息。
+type MediaMessagePayload struct {
+	MediaID string `json:"media_id"` // 上传临时素材后获得的媒体文件 ID
+}
+
+// VideoMessagePayload 表示使用临时素材发送的视频消息体。
+type VideoMessagePayload struct {
+	MediaID     string `json:"media_id"`              // 上传临时素材后获得的视频文件 ID
+	Title       string `json:"title,omitempty"`       // 视频标题，企业微信限制为 64 字节
+	Description string `json:"description,omitempty"` // 视频描述，企业微信限制为 512 字节
+}
+
+// FileMessage 表示文件消息。
+type FileMessage struct {
+	MsgType string              `json:"msgtype"` // 固定为 file
+	File    MediaMessagePayload `json:"file"`
+}
+
+// ImageMessage 表示图片消息。
+type ImageMessage struct {
+	MsgType string              `json:"msgtype"` // 固定为 image
+	Image   MediaMessagePayload `json:"image"`
+}
+
+// VoiceMessage 表示语音消息。
+type VoiceMessage struct {
+	MsgType string              `json:"msgtype"` // 固定为 voice
+	Voice   MediaMessagePayload `json:"voice"`
+}
+
+// VideoMessage 表示视频消息。
+type VideoMessage struct {
+	MsgType string              `json:"msgtype"` // 固定为 video
+	Video   VideoMessagePayload `json:"video"`
 }
 
 // BuildStreamReply 根据 streamID 组装流式回复明文。

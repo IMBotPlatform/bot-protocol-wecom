@@ -4,6 +4,8 @@
 
 > 本文档为存量资料，仅供参考。若与官方最新文档有差异，请以官方为准。
 
+> 日志安全边界：SDK 不记录解密后的请求或加密前的回复。业务层如需可观测信息，只记录无业务正文、无 `userid`、无注册 Token 的结构化事件。
+
 ## 1. 支持的消息类型矩阵
 
 ### 1.1 接收消息 (Bot 接收)
@@ -41,6 +43,26 @@
 | :--- | :--- | :--- |
 | **Markdown** | `markdown` | `bot.ResponseMarkdown(responseURL, content)` |
 | **模板卡片** | `template_card` | `bot.ResponseTemplateCard(responseURL, card)` |
+
+### 1.5 长连接回复与主动推送
+
+长连接普通回复支持流式、模板卡片、Markdown、文件、图片、语音和视频消息；主动推送支持模板卡片、Markdown 和四类媒体消息。
+
+| 场景 | SDK 入口 | 关键约束 |
+| :--- | :--- | :--- |
+| 普通回复 | `Chunk.Payload` 携带对应消息结构 | 不支持 `stream_with_template_card`，流式回复不支持 `msg_item` |
+| Markdown 推送 | `SendMarkdownWithChatType` | `chat_type` 可选择自动、单聊或群聊 |
+| 模板卡片推送 | `SendTemplateCardWithChatType` | 目标会话需要先与机器人交互 |
+| 媒体推送 | `SendFile` / `SendImage` / `SendVoice` / `SendVideo` | 先上传临时素材取得 `media_id` |
+
+### 1.6 长连接临时素材
+
+`UploadMedia` 自动执行 `aibot_upload_media_init`、`aibot_upload_media_chunk`、`aibot_upload_media_finish`；也可以分别调用 `InitMediaUpload`、`UploadMediaChunk`、`FinishMediaUpload` 自定义分片或断线续传。
+
+- 每片 Base64 编码前不超过 512KB，最多 100 片。
+- 图片支持 PNG/JPG/JPEG/GIF，语音支持 AMR，视频支持 MP4。
+- SDK 按机器人执行 30 次/分钟、1000 次/小时滚动限流，等待过程支持 `context` 取消。
+- 上传会话 30 分钟有效；完成后取得的 `media_id` 3 天有效。
 
 ---
 
@@ -112,14 +134,14 @@ Bot 收到的报文通过 `Message` 结构体解析。开发者可根据 `MsgTyp
 
 | 原始事件类型 (`event_type`) | Bot 推荐处理方式 |
 | :--- | :--- |
-| `enter_chat` (进入会话) | 根据 `Message.EventType` 判断，回复欢迎卡片 |
+| `enter_chat` (进入会话) | 根据 `Message.Event.EventType` 判断，回复欢迎卡片 |
 | `template_card_event` (卡片交互) | 取 `EventKey` 执行对应业务逻辑 |
 | `feedback_event` (用户反馈) | 记录反馈数据，返回空包即可 |
 
 ## 4. 开发场景示例
 
 ### 场景 A: 实现欢迎语
-1.  在 Handler 中判断 `ctx.Message.MsgType == "event"` 且 `ctx.Message.EventType == "enter_chat"`。
+1.  在 Handler 中判断 `ctx.Message.MsgType == "event"` 且 `ctx.Message.Event != nil`、`ctx.Message.Event.EventType == "enter_chat"`。
 2.  使用 `ctx.Bot.ResponseTemplateCard(ctx.ResponseURL, card)` 回复欢迎卡片。
 3.  返回空 channel（不产生流式回复）。
 

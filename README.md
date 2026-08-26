@@ -4,17 +4,19 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/IMBotPlatform/bot-protocol-wecom)](https://goreportcard.com/report/github.com/IMBotPlatform/bot-protocol-wecom)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> 🤖 企业微信(WeCom) AI Bot SDK - 完整的 Go 实现
+> 🤖 企业微信（WeCom）AI Bot 回调与长连接协议 Go SDK
 
 ## ✨ 功能特性
 
 | 功能 | 描述 |
 |------|------|
 | 🌐 **双接入模式** | 支持 Webhook 回调模式与 WebSocket 长连接模式 |
-| 🤖 **完整 Bot 能力** | 流式响应、主动回复、模板卡片、事件处理 |
+| 🤖 **协议 Bot 能力** | 流式响应、主动回复、模板卡片、事件处理 |
 | 🔐 **消息加解密** | AES-CBC 加解密，签名校验 |
 | 💬 **消息类型** | 文本、图片、语音、文件、视频、图文混排、引用消息、流式消息、事件 |
 | 🎴 **模板卡片** | 完整的企业微信模板卡片类型支持 |
+| 📡 **长连接增强** | Markdown/文件/图片/语音/视频回复与主动推送、`chat_type` |
+| 📦 **临时素材** | 三阶段上传、自动 512KB 分片、MD5、大小/格式与频率限制 |
 
 ## 📦 安装
 
@@ -110,6 +112,7 @@ bot-protocol-wecom/
 │   ├── crypt.go         # 加解密实现
 │   ├── longconn_bot.go  # 长连接连接管理与回调分发
 │   ├── longconn_message.go # 长连接协议结构
+│   ├── longconn_media.go # 长连接临时素材分片上传
 │   ├── message.go       # 消息类型定义
 │   ├── handler.go       # Handler 接口
 │   ├── stream.go        # StreamManager
@@ -132,36 +135,22 @@ handler := wecom.HandlerFunc(func(ctx wecom.Context) <-chan wecom.Chunk {
 })
 ```
 
-## 📡 长连接主动推送
+## 📡 长连接主动推送与素材上传
 
 ```go
-package main
-
-import (
-    "context"
-    "log"
-
-    "github.com/IMBotPlatform/bot-protocol-wecom/pkg/wecom"
+// 以下代码假设 bot 已经通过 Start 建立长连接。
+_ = bot.SendMarkdownWithChatType(
+    "USER_ID",
+    wecom.LongConnChatTypeSingle,
+    "**hello from longconn**",
 )
 
-func main() {
-    bot, err := wecom.NewLongConnBot("BOT_ID", "SECRET", nil)
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    ctx, cancel := context.WithCancel(context.Background())
-    defer cancel()
-
-    go func() {
-        if err := bot.Start(ctx); err != nil {
-            log.Printf("longconn stopped: %v", err)
-        }
-    }()
-
-    // 主动推送消息到单聊 userid 或群聊 chatid。
-    _ = bot.SendMarkdown("CHAT_ID", "**hello from longconn**")
+// 上传临时素材后主动推送文件；UploadMedia 会自动分片并执行 init/chunk/finish。
+result, err := bot.UploadMedia(ctx, wecom.LongConnMediaTypeFile, "report.pdf", fileBytes)
+if err != nil {
+    log.Fatal(err)
 }
+_ = bot.SendFileWithChatType("CHAT_ID", wecom.LongConnChatTypeGroup, result.MediaID)
 ```
 
 ## ⚙️ 常用环境变量
@@ -180,10 +169,18 @@ func main() {
 ## 📝 长连接说明
 
 - 长连接模式会自动完成订阅、心跳和断线重连。
-- 普通消息回调会自动映射到 `aibot_respond_msg`。
+- 普通消息回调会自动映射到 `aibot_respond_msg`，支持流式、模板卡片、Markdown、文件、图片、语音和视频消息。
 - `enter_chat` 事件会自动映射到 `aibot_respond_welcome_msg`。
 - `template_card_event` 会自动映射到 `aibot_respond_update_msg`。
-- 长连接资源消息目前会透出 `aeskey` 字段，便于调用方自行做图片/文件解密下载。
+- 主动推送支持 `chat_type=0/1/2`，旧版 `SendMarkdown` / `SendTemplateCard` 默认保持兼容模式（`0` 或省略）。
+- `UploadMedia` 支持文件、PNG/JPG/JPEG/GIF 图片、AMR 语音和 MP4 视频，遵守 512KB/片、100 片、30 次/分钟和 1000 次/小时限制。
+- 长连接资源消息会透出图片、文件和视频的 `aeskey` 字段，便于调用方自行解密下载。
+- 按官网约束，长连接普通回复会拒绝“流式+模板卡片”组合和带 `msg_item` 的流式消息；Webhook 模式仍支持最终流式包携带 `msg_item`。
+
+## 🧩 能力边界
+
+- 本仓库实现企业微信机器人回调与长连接**协议 SDK**，不负责产品侧命令、Agent skill、认证托管或部署编排。
+- 官方“API 模式机器人文档使用说明”描述的是企业微信托管的 MCP/API 能力，不等同于本 SDK 的机器人协议能力，也未在本仓库中实现。
 
 ## 📖 文档
 

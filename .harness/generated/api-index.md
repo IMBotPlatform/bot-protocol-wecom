@@ -27,6 +27,12 @@
 - `LongConnHeaders`
 - `LongConnRawFrame`
 - `LongConnPushMessage`
+- `LongConnChatType`
+- `LongConnMediaType`
+- `LongConnUploadMediaInitBody`
+- `LongConnUploadMediaChunkBody`
+- `LongConnUploadMediaFinishBody`
+- `LongConnUploadMediaResult`
 - `Crypt`
 - `Context`
 - `Chunk`
@@ -37,6 +43,12 @@
 - `TemplateCard`
 - `LongConnRequest`
 - `LongConnResponse`
+- `MediaMessagePayload`
+- `VideoMessagePayload`
+- `FileMessage`
+- `ImageMessage`
+- `VoiceMessage`
+- `VideoMessage`
 
 ## Notable Exported Methods
 
@@ -55,7 +67,21 @@
 - `(*LongConnBot).Start`
 - `(*LongConnBot).Close`
 - `(*LongConnBot).SendMarkdown`
+- `(*LongConnBot).SendMarkdownWithChatType`
 - `(*LongConnBot).SendTemplateCard`
+- `(*LongConnBot).SendTemplateCardWithChatType`
+- `(*LongConnBot).SendFile`
+- `(*LongConnBot).SendFileWithChatType`
+- `(*LongConnBot).SendImage`
+- `(*LongConnBot).SendImageWithChatType`
+- `(*LongConnBot).SendVoice`
+- `(*LongConnBot).SendVoiceWithChatType`
+- `(*LongConnBot).SendVideo`
+- `(*LongConnBot).SendVideoWithChatType`
+- `(*LongConnBot).InitMediaUpload`
+- `(*LongConnBot).UploadMediaChunk`
+- `(*LongConnBot).FinishMediaUpload`
+- `(*LongConnBot).UploadMedia`
 - `(HandlerFunc).Handle`
 - `(LongConnRawFrame).HasAckResult`
 - `(LongConnRawFrame).IsCallback`
@@ -72,4 +98,13 @@
 - `BuildLongConnSubscribeRequest`
 - `BuildLongConnPingRequest`
 - `BuildLongConnSendMarkdownRequest`
+- `BuildLongConnSendMarkdownRequestWithChatType`
 - `BuildLongConnSendTemplateCardRequest`
+- `BuildLongConnSendTemplateCardRequestWithChatType`
+- `BuildLongConnSendFileRequest` / `BuildLongConnSendFileRequestWithChatType`
+- `BuildLongConnSendImageRequest` / `BuildLongConnSendImageRequestWithChatType`
+- `BuildLongConnSendVoiceRequest` / `BuildLongConnSendVoiceRequestWithChatType`
+- `BuildLongConnSendVideoRequest` / `BuildLongConnSendVideoRequestWithChatType`
+- `BuildLongConnUploadMediaInitRequest`
+- `BuildLongConnUploadMediaChunkRequest`
+- `BuildLongConnUploadMediaFinishRequest`

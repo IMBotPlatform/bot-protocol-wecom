@@ -17,6 +17,9 @@ public_routes:
       - aibot_respond_welcome_msg
       - aibot_respond_update_msg
       - aibot_send_msg
+      - aibot_upload_media_init
+      - aibot_upload_media_chunk
+      - aibot_upload_media_finish
 
 events:
   - name: aibot_msg_callback
@@ -58,6 +61,22 @@ enums:
       - aibot_respond_msg
       - aibot_respond_update_msg
       - aibot_send_msg
+      - aibot_upload_media_init
+      - aibot_upload_media_chunk
+      - aibot_upload_media_finish
+  - name: LongConnChatType
+    path: pkg/wecom/longconn_message.go
+    values:
+      - 0 (auto)
+      - 1 (single)
+      - 2 (group)
+  - name: LongConnMediaType
+    path: pkg/wecom/longconn_message.go
+    values:
+      - file
+      - image
+      - voice
+      - video
 
 schemas:
   - name: Message
@@ -78,6 +97,12 @@ schemas:
     path: pkg/wecom/longconn_message.go
   - name: LongConnPushMessage
     path: pkg/wecom/longconn_message.go
+  - name: FileMessage / ImageMessage / VoiceMessage / VideoMessage
+    path: pkg/wecom/message.go
+  - name: LongConnUploadMediaInitBody / LongConnUploadMediaChunkBody / LongConnUploadMediaFinishBody
+    path: pkg/wecom/longconn_message.go
+  - name: LongConnUploadMediaResult
+    path: pkg/wecom/longconn_message.go
 
 sdk_facades:
   - name: Bot
@@ -90,6 +115,10 @@ sdk_facades:
     path: pkg/wecom/handler.go
   - name: BuildStreamReplyWithMsgItems
     path: pkg/wecom/message.go
+  - name: LongConnBot.UploadMedia
+    path: pkg/wecom/longconn_media.go
+  - name: LongConnBot.SendFile / SendImage / SendVoice / SendVideo
+    path: pkg/wecom/longconn_bot.go
 
 generated_mirrors: []
 

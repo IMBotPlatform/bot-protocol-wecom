@@ -114,3 +114,60 @@ func TestParseMessageWithQuoteVideo(t *testing.T) {
 		t.Fatalf("unexpected quote video aeskey: %s", msg.Quote.Video.AESKey)
 	}
 }
+
+func TestMediaMessagesJSON(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  any
+		want string
+	}{
+		{
+			name: "file",
+			msg: FileMessage{
+				MsgType: "file",
+				File:    MediaMessagePayload{MediaID: "media-file"},
+			},
+			want: `{"msgtype":"file","file":{"media_id":"media-file"}}`,
+		},
+		{
+			name: "image",
+			msg: ImageMessage{
+				MsgType: "image",
+				Image:   MediaMessagePayload{MediaID: "media-image"},
+			},
+			want: `{"msgtype":"image","image":{"media_id":"media-image"}}`,
+		},
+		{
+			name: "voice",
+			msg: VoiceMessage{
+				MsgType: "voice",
+				Voice:   MediaMessagePayload{MediaID: "media-voice"},
+			},
+			want: `{"msgtype":"voice","voice":{"media_id":"media-voice"}}`,
+		},
+		{
+			name: "video",
+			msg: VideoMessage{
+				MsgType: "video",
+				Video: VideoMessagePayload{
+					MediaID:     "media-video",
+					Title:       "title",
+					Description: "description",
+				},
+			},
+			want: `{"msgtype":"video","video":{"media_id":"media-video","title":"title","description":"description"}}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := json.Marshal(tt.msg)
+			if err != nil {
+				t.Fatalf("marshal media message: %v", err)
+			}
+			if string(data) != tt.want {
+				t.Fatalf("unexpected json: got=%s want=%s", string(data), tt.want)
+			}
+		})
+	}
+}

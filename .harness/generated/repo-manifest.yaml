@@ -6,10 +6,13 @@ owns:
   - downloaded media decryption helpers
   - passive stream reply structures
   - long connection request / response runtime
+  - long connection media replies and active pushes
+  - long connection temporary media upload
 not_owns:
   - command routing
   - product skills
   - deployment workflow
+  - WeCom-hosted MCP or API-mode tools
 entrypoints:
   - pkg/wecom/bot.go
   - pkg/wecom/longconn_bot.go
@@ -20,6 +23,7 @@ high_risk_areas:
   - pkg/wecom/crypt.go
   - pkg/wecom/message.go
   - pkg/wecom/longconn_bot.go
+  - pkg/wecom/longconn_media.go
 read_first:
   - AGENTS.md
   - README.md

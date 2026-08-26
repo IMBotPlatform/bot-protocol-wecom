@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/url"
 	"sort"
 	"strings"
@@ -157,13 +156,6 @@ func (c *Crypt) DecryptMessage(msgSignature, timestamp, nonce string, req Encryp
 		return nil, err
 	}
 
-	// LOG: 记录解密后的请求明文，便于调试业务逻辑
-	if pretty, err := json.MarshalIndent(msg, "", "  "); err == nil {
-		log.Printf("WeCom Request Decrypted:\n%s\n", string(pretty))
-	} else {
-		log.Printf("WeCom Request Decrypted: %s\n", string(plain))
-	}
-
 	return msg, nil
 }
 
@@ -185,13 +177,6 @@ func (c *Crypt) EncryptResponse(payload any, timestamp, nonce string) (Encrypted
 	body, err := jsonMarshal(payload)
 	if err != nil {
 		return EncryptedResponse{}, err
-	}
-
-	// LOG: 记录即将加密的响应明文，使用 Pretty Print 格式
-	if pretty, err := json.MarshalIndent(payload, "", "  "); err == nil {
-		log.Printf("WeCom Response Plain:\n%s\n", string(pretty))
-	} else {
-		log.Printf("WeCom Response Plain: %s\n", string(body))
 	}
 
 	// 第二步：调用 encrypt 将 JSON 明文转换为企业微信要求的密文。

@@ -4,6 +4,9 @@
 
 ```bash
 go test ./...
+go test -race ./pkg/wecom
+go vet ./...
+git diff --check
 ```
 
 ## When To Re-run Full Suite
@@ -14,6 +17,7 @@ go test ./...
 - 改动 `pkg/wecom/message.go`
 - 改动 `pkg/wecom/longconn_bot.go`
 - 改动 `pkg/wecom/longconn_message.go`
+- 改动 `pkg/wecom/longconn_media.go`
 
 ## Example Smoke Path
 
@@ -22,7 +26,10 @@ go test ./...
 
 ## Targeted Test Clues
 
+- 回调加解密不得记录业务明文：`pkg/wecom/crypt_test.go` 的 `TestCryptDoesNotLogMessagePlaintext`
 - 长连接回调命令映射：`pkg/wecom/longconn_bot_test.go`
+- 长连接媒体协议构造：`pkg/wecom/longconn_message_test.go`
+- 长连接素材参数、限流与 WebSocket 端到端上传：`pkg/wecom/longconn_media_test.go`
 - 下载资源解密 helper：`pkg/wecom/crypt_test.go`
 - 流式图片 `msg_item` 组装：`pkg/wecom/message_test.go`
 

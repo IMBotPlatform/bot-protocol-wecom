@@ -10,5 +10,6 @@
 | `pkg/wecom/stream.go` | internal runtime | 流式会话管理 |
 | `pkg/wecom/longconn_bot.go` | runtime entry | 长连接模式运行时与主动推送 |
 | `pkg/wecom/longconn_message.go` | contract | 长连接命令常量、请求帧与响应帧 |
+| `pkg/wecom/longconn_media.go` | runtime helper | 长连接临时素材三阶段上传、自动分片与频率控制 |
 | `pkg/wecom/template_card.go` | contract | 模板卡片结构 |
 | `example/echo/main.go` | example | 最小接入示例与图片下载密文解密示例 |

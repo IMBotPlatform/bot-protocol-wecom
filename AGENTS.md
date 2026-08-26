@@ -5,7 +5,7 @@
 这个仓库负责企业微信协议 SDK。
 
 - owns: 回调验签、消息加解密、流式回复、长连接连接管理、模板卡片结构
-- not owns: 命令系统、产品侧 skills、部署编排、Claude CLI 适配
+- not owns: 命令系统、产品侧 skills、部署编排、具体 Agent Runtime 选型与适配
 
 ## Start Here
 

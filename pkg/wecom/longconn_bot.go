@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -58,6 +59,9 @@ type LongConnBot struct {
 
 	pendingMu sync.Mutex
 	pending   map[string]chan longConnAckResult
+	// mediaRateMu/mediaRequestTimes 记录素材上传命令的滚动限流窗口。
+	mediaRateMu       sync.Mutex
+	mediaRequestTimes []time.Time
 
 	closeOnce sync.Once
 	closedCh  chan struct{}
@@ -207,28 +211,162 @@ func (b *LongConnBot) Close() error {
 
 // SendMarkdown 主动推送 Markdown 消息到指定会话。
 func (b *LongConnBot) SendMarkdown(chatID, content string) error {
-	if chatID == "" {
+	return b.SendMarkdownWithChatType(chatID, LongConnChatTypeAuto, content)
+}
+
+// SendMarkdownWithChatType 主动推送 Markdown 消息到指定类型的会话。
+func (b *LongConnBot) SendMarkdownWithChatType(chatID string, chatType LongConnChatType, content string) error {
+	if b == nil {
+		return errors.New("longconn bot is nil")
+	}
+	if strings.TrimSpace(chatID) == "" {
 		return errors.New("chat id is required")
 	}
+	if err := validateLongConnChatType(chatType); err != nil {
+		return err
+	}
 
-	req := BuildLongConnSendMarkdownRequest(b.nextRequestID(), chatID, content)
-	ctx, cancel := b.newRequestContext(context.Background())
-	defer cancel()
-
-	return b.sendRequestAndWait(ctx, req.Cmd, req.Headers.RequestID, req.Body)
+	req := BuildLongConnSendMarkdownRequestWithChatType(b.nextRequestID(), chatID, chatType, content)
+	return b.sendRequestWithTimeout(context.Background(), req)
 }
 
 // SendTemplateCard 主动推送模板卡片消息到指定会话。
 func (b *LongConnBot) SendTemplateCard(chatID string, card *TemplateCard) error {
-	if chatID == "" {
+	return b.SendTemplateCardWithChatType(chatID, LongConnChatTypeAuto, card)
+}
+
+// SendTemplateCardWithChatType 主动推送模板卡片消息到指定类型的会话。
+func (b *LongConnBot) SendTemplateCardWithChatType(chatID string, chatType LongConnChatType, card *TemplateCard) error {
+	if b == nil {
+		return errors.New("longconn bot is nil")
+	}
+	if strings.TrimSpace(chatID) == "" {
 		return errors.New("chat id is required")
+	}
+	if err := validateLongConnChatType(chatType); err != nil {
+		return err
 	}
 	if card == nil {
 		return errors.New("template card is nil")
 	}
 
-	req := BuildLongConnSendTemplateCardRequest(b.nextRequestID(), chatID, card)
-	ctx, cancel := b.newRequestContext(context.Background())
+	req := BuildLongConnSendTemplateCardRequestWithChatType(b.nextRequestID(), chatID, chatType, card)
+	return b.sendRequestWithTimeout(context.Background(), req)
+}
+
+// SendFile 主动推送文件消息到指定会话。
+func (b *LongConnBot) SendFile(chatID, mediaID string) error {
+	return b.SendFileWithChatType(chatID, LongConnChatTypeAuto, mediaID)
+}
+
+// SendFileWithChatType 主动推送文件消息到指定类型的会话。
+func (b *LongConnBot) SendFileWithChatType(chatID string, chatType LongConnChatType, mediaID string) error {
+	req, err := b.buildMediaPushRequest(chatID, chatType, mediaID, func(reqID string) LongConnRequest {
+		return BuildLongConnSendFileRequestWithChatType(reqID, chatID, chatType, mediaID)
+	})
+	if err != nil {
+		return err
+	}
+	return b.sendRequestWithTimeout(context.Background(), req)
+}
+
+// SendImage 主动推送图片消息到指定会话。
+func (b *LongConnBot) SendImage(chatID, mediaID string) error {
+	return b.SendImageWithChatType(chatID, LongConnChatTypeAuto, mediaID)
+}
+
+// SendImageWithChatType 主动推送图片消息到指定类型的会话。
+func (b *LongConnBot) SendImageWithChatType(chatID string, chatType LongConnChatType, mediaID string) error {
+	req, err := b.buildMediaPushRequest(chatID, chatType, mediaID, func(reqID string) LongConnRequest {
+		return BuildLongConnSendImageRequestWithChatType(reqID, chatID, chatType, mediaID)
+	})
+	if err != nil {
+		return err
+	}
+	return b.sendRequestWithTimeout(context.Background(), req)
+}
+
+// SendVoice 主动推送语音消息到指定会话。
+func (b *LongConnBot) SendVoice(chatID, mediaID string) error {
+	return b.SendVoiceWithChatType(chatID, LongConnChatTypeAuto, mediaID)
+}
+
+// SendVoiceWithChatType 主动推送语音消息到指定类型的会话。
+func (b *LongConnBot) SendVoiceWithChatType(chatID string, chatType LongConnChatType, mediaID string) error {
+	req, err := b.buildMediaPushRequest(chatID, chatType, mediaID, func(reqID string) LongConnRequest {
+		return BuildLongConnSendVoiceRequestWithChatType(reqID, chatID, chatType, mediaID)
+	})
+	if err != nil {
+		return err
+	}
+	return b.sendRequestWithTimeout(context.Background(), req)
+}
+
+// SendVideo 主动推送视频消息到指定会话。
+func (b *LongConnBot) SendVideo(chatID, mediaID, title, description string) error {
+	return b.SendVideoWithChatType(
+		chatID,
+		LongConnChatTypeAuto,
+		mediaID,
+		title,
+		description,
+	)
+}
+
+// SendVideoWithChatType 主动推送视频消息到指定类型的会话。
+func (b *LongConnBot) SendVideoWithChatType(chatID string, chatType LongConnChatType, mediaID, title, description string) error {
+	req, err := b.buildMediaPushRequest(chatID, chatType, mediaID, func(reqID string) LongConnRequest {
+		return BuildLongConnSendVideoRequestWithChatType(
+			reqID,
+			chatID,
+			chatType,
+			mediaID,
+			title,
+			description,
+		)
+	})
+	if err != nil {
+		return err
+	}
+	return b.sendRequestWithTimeout(context.Background(), req)
+}
+
+// buildMediaPushRequest 校验媒体主动推送参数并构造请求。
+func (b *LongConnBot) buildMediaPushRequest(chatID string, chatType LongConnChatType, mediaID string, build func(string) LongConnRequest) (LongConnRequest, error) {
+	if b == nil {
+		return LongConnRequest{}, errors.New("longconn bot is nil")
+	}
+	if strings.TrimSpace(chatID) == "" {
+		return LongConnRequest{}, errors.New("chat id is required")
+	}
+	if err := validateLongConnChatType(chatType); err != nil {
+		return LongConnRequest{}, err
+	}
+	if strings.TrimSpace(mediaID) == "" {
+		return LongConnRequest{}, errors.New("media id is required")
+	}
+	if build == nil {
+		return LongConnRequest{}, errors.New("media request builder is nil")
+	}
+	return build(b.nextRequestID()), nil
+}
+
+// validateLongConnChatType 校验企业微信支持的主动推送会话类型。
+func validateLongConnChatType(chatType LongConnChatType) error {
+	switch chatType {
+	case LongConnChatTypeAuto, LongConnChatTypeSingle, LongConnChatTypeGroup:
+		return nil
+	default:
+		return fmt.Errorf("unsupported longconn chat type: %d", chatType)
+	}
+}
+
+// sendRequestWithTimeout 以 SDK 配置的单次请求超时发送长连接命令。
+func (b *LongConnBot) sendRequestWithTimeout(parent context.Context, req LongConnRequest) error {
+	if b == nil {
+		return errors.New("longconn bot is nil")
+	}
+	ctx, cancel := b.newRequestContext(parent)
 	defer cancel()
 
 	return b.sendRequestAndWait(ctx, req.Cmd, req.Headers.RequestID, req.Body)
@@ -307,6 +445,7 @@ func (b *LongConnBot) readLoop(conn *websocket.Conn, errCh chan<- error) {
 		if frame.HasAckResult() {
 			response := LongConnResponse{
 				Headers: frame.Headers,
+				Body:    frame.Body,
 				ErrMsg:  frame.ErrMsg,
 			}
 			if frame.ErrCode != nil {
@@ -495,14 +634,32 @@ func (b *LongConnBot) consumeOneShotChunks(command string, requestID string, out
 }
 
 // normalizeLongConnMessageBody 将业务层 Payload 归一化为长连接普通消息回复体。
-// 当前支持文本、模板卡片、流式消息，以及少量便捷输入（string / *TemplateCard）。
+// 当前支持文本、模板卡片、Markdown、媒体消息、流式消息，以及少量便捷输入（string / *TemplateCard）。
 func normalizeLongConnMessageBody(payload any) (any, error) {
 	switch body := payload.(type) {
 	case TextMessage, *TextMessage,
 		TemplateCardMessage, *TemplateCardMessage,
-		StreamReply, *StreamReply,
-		StreamWithTemplateCardMessage, *StreamWithTemplateCardMessage:
+		MarkdownMessage, *MarkdownMessage,
+		FileMessage, *FileMessage,
+		ImageMessage, *ImageMessage,
+		VoiceMessage, *VoiceMessage,
+		VideoMessage, *VideoMessage:
 		return body, nil
+	case StreamReply:
+		if len(body.Stream.MsgItem) > 0 {
+			return nil, errors.New("longconn stream reply does not support msg_item")
+		}
+		return body, nil
+	case *StreamReply:
+		if body == nil {
+			return nil, errors.New("longconn stream reply is nil")
+		}
+		if len(body.Stream.MsgItem) > 0 {
+			return nil, errors.New("longconn stream reply does not support msg_item")
+		}
+		return body, nil
+	case StreamWithTemplateCardMessage, *StreamWithTemplateCardMessage:
+		return nil, errors.New("longconn does not support stream with template card")
 	case *TemplateCard:
 		return TemplateCardMessage{
 			MsgType:      "template_card",
@@ -588,13 +745,19 @@ func (b *LongConnBot) sendCallbackCommand(command string, requestID string, body
 
 // sendRequestAndWait 发送一条长连接命令，并等待同 req_id 的响应帧返回。
 func (b *LongConnBot) sendRequestAndWait(ctx context.Context, command, requestID string, body any) error {
+	_, err := b.sendRequestAndWaitResponse(ctx, command, requestID, body)
+	return err
+}
+
+// sendRequestAndWaitResponse 发送一条长连接命令，并返回同 req_id 的完整响应帧。
+func (b *LongConnBot) sendRequestAndWaitResponse(ctx context.Context, command, requestID string, body any) (LongConnResponse, error) {
 	if requestID == "" {
-		return errors.New("request id is required")
+		return LongConnResponse{}, errors.New("request id is required")
 	}
 
 	conn := b.currentConn()
 	if conn == nil {
-		return errors.New("longconn websocket is not connected")
+		return LongConnResponse{}, errors.New("longconn websocket is not connected")
 	}
 
 	waiter := b.registerPending(requestID)
@@ -603,25 +766,25 @@ func (b *LongConnBot) sendRequestAndWait(ctx context.Context, command, requestID
 	// 关键步骤：先登记 pending，再写请求，避免响应过快时丢失通知。
 	req := NewLongConnRequest(command, requestID, body)
 	if err := b.writeJSON(conn, req); err != nil {
-		return err
+		return LongConnResponse{}, err
 	}
 
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return LongConnResponse{}, ctx.Err()
 	case result := <-waiter:
 		if result.err != nil {
-			return result.err
+			return result.response, result.err
 		}
 		if result.response.ErrCode != 0 {
-			return &longConnAPIError{
+			return result.response, &longConnAPIError{
 				cmd:       command,
 				requestID: requestID,
 				errCode:   result.response.ErrCode,
 				errMsg:    result.response.ErrMsg,
 			}
 		}
-		return nil
+		return result.response, nil
 	}
 }
 
