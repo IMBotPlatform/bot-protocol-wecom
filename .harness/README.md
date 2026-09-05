@@ -8,7 +8,11 @@
 - 哪些类型属于公开契约
 - 哪些改动会影响下游 `IMBotCore`
 
-## Reading Order
+## 按任务读取
+
+先遵守本 repo 的 AGENTS，再进入 `../pkg/wecom/` 的协议实现与对应测试；公开 wire/type 变动再读合同索引并核对 IMBotCore 消费端。
+
+验证或修改时选择 `generated/validation-index.yaml`；API/类型改变选择 contract/api index；完整架构与运行手册只在证据不足时展开。下列保留完整导航，不构成预读顺序：
 
 1. `generated/repo-manifest.yaml`
 2. `generated/module-map.md`
