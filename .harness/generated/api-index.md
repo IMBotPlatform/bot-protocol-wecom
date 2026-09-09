@@ -64,6 +64,7 @@
 - `(*Crypt).Encrypt`
 - `(*Crypt).Decrypt`
 - `(*Crypt).DecryptDownloadedFile`
+- `(*LongConnBot).Ready` / `ErrLongConnReplaced` / `LongConnOptions.OnError`
 - `(*LongConnBot).Start`
 - `(*LongConnBot).Close`
 - `(*LongConnBot).SendMarkdown`

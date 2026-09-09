@@ -175,7 +175,7 @@ _ = bot.SendFileWithChatType("CHAT_ID", wecom.LongConnChatTypeGroup, result.Medi
 - 主动推送支持 `chat_type=0/1/2`，旧版 `SendMarkdown` / `SendTemplateCard` 默认保持兼容模式（`0` 或省略）。
 - `UploadMedia` 支持文件、PNG/JPG/JPEG/GIF 图片、AMR 语音和 MP4 视频，遵守 512KB/片、100 片、30 次/分钟和 1000 次/小时限制。
 - 长连接资源消息会透出图片、文件和视频的 `aeskey` 字段，便于调用方自行解密下载。
-- 按官网约束，长连接普通回复会拒绝“流式+模板卡片”组合和带 `msg_item` 的流式消息；Webhook 模式仍支持最终流式包携带 `msg_item`。
+- 按官网约束，长连接普通回复拒绝“流式+模板卡片”组合；Handler 的最终流式图片会转换成素材上传和独立图片回复，线上帧不携带 `msg_item`。
 
 ## 🧩 能力边界
 
@@ -193,3 +193,13 @@ _ = bot.SendFileWithChatType("CHAT_ID", wecom.LongConnChatTypeGroup, result.Medi
 ## 📄 License
 
 [MIT](LICENSE) © IMBotPlatform
+
+### 长连接生命周期与回复
+
+`LongConnBot.Ready()` 只在订阅成功后为 true；临时断线自动重连，每次连接独立管理心跳。鉴权失败或收到 `disconnected_event` 后 `Start` 返回错误；后者可用 `errors.Is(err, wecom.ErrLongConnReplaced)` 判断，不应自动重启争抢订阅。
+
+回调按 msgid 去重（缺失时使用 req_id），进程内保存最多 10,000 条、24 小时；重启后的业务幂等仍由下游负责。`Context.StreamID` 使用 msgid（缺失时 req_id）供下游建立稳定请求身份；SDK 独立管理实际回复 stream.id。业务处理不阻塞 WebSocket ACK 读取。
+
+文本更新合并为约 4 秒一次完整快照，首条和最终条立即发送；被动和主动发送共享每会话 30 次/分钟、1000 次/小时预算，等待受 RequestTimeout 约束。9 分钟关闭当前流，后续输出建立新流。ACK 失败不自动重试，`LongConnOptions.OnError` 可观察异步回传失败，错误不含服务端正文/凭据。单聊主动发送使用 userid 和 `LongConnChatTypeSingle`。
+
+验证入口：`go test -race ./...`；`pkg/wecom/longconn_integration_test.go` 使用模拟 WebSocket，不能替代真实企业微信验收。

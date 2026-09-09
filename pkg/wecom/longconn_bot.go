@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -30,6 +31,8 @@ type LongConnOptions struct {
 	RequestTimeout    time.Duration
 	WriteTimeout      time.Duration
 	Dialer            *websocket.Dialer
+	// OnError receives asynchronous delivery failures, without message bodies.
+	OnError func(error)
 }
 
 // LongConnBot 负责企业微信长连接模式的连接管理与消息收发。
@@ -45,6 +48,7 @@ type LongConnBot struct {
 	botID   string
 	secret  string
 	handler Handler
+	onError func(error)
 
 	wsURL             string
 	pingInterval      time.Duration
@@ -53,9 +57,15 @@ type LongConnBot struct {
 	writeTimeout      time.Duration
 	dialer            *websocket.Dialer
 
-	connMu  sync.RWMutex
-	conn    *websocket.Conn
-	writeMu sync.Mutex
+	connMu        sync.RWMutex
+	conn          *websocket.Conn
+	ready         bool
+	running       atomic.Bool
+	callbackMu    sync.Mutex
+	callbacks     map[string]longConnCallback
+	messageRateMu sync.Mutex
+	messageTimes  map[string][]time.Time
+	writeMu       sync.Mutex
 
 	pendingMu sync.Mutex
 	pending   map[string]chan longConnAckResult
@@ -87,11 +97,9 @@ func (e *longConnAPIError) Error() string {
 		return ""
 	}
 	return fmt.Sprintf(
-		"longconn api error: cmd=%s req_id=%s errcode=%d errmsg=%s",
+		"longconn api error: cmd=%s errcode=%d",
 		e.cmd,
-		e.requestID,
 		e.errCode,
-		e.errMsg,
 	)
 }
 
@@ -143,6 +151,7 @@ func NewLongConnBotWithOptions(botID, secret string, handler Handler, opts LongC
 		botID:             botID,
 		secret:            secret,
 		handler:           handler,
+		onError:           opts.OnError,
 		wsURL:             resolveString(opts.WebSocketURL, envLongConnWSURL, defaultLongConnWSURL),
 		pingInterval:      resolveDuration(opts.PingInterval, envLongConnPingInterval, 30*time.Second),
 		reconnectInterval: resolveDuration(opts.ReconnectInterval, envLongConnReconnectInterval, 3*time.Second),
@@ -161,6 +170,10 @@ func (b *LongConnBot) Start(ctx context.Context) error {
 		return errors.New("longconn bot is nil")
 	}
 
+	if !b.running.CompareAndSwap(false, true) {
+		return errors.New("longconn bot already started")
+	}
+	defer b.running.Store(false)
 	for {
 		// 关键步骤：每轮循环代表一次完整会话，断线后按重连间隔重新建立。
 		select {
@@ -177,6 +190,9 @@ func (b *LongConnBot) Start(ctx context.Context) error {
 		}
 
 		var permanent *longConnPermanentError
+		if errors.Is(err, ErrLongConnReplaced) {
+			return err
+		}
 		if errors.As(err, &permanent) {
 			return permanent.err
 		}
@@ -201,7 +217,11 @@ func (b *LongConnBot) Close() error {
 		close(b.closedCh)
 	})
 
-	conn := b.currentConn()
+	b.connMu.Lock()
+	conn := b.conn
+	b.conn = nil
+	b.ready = false
+	b.connMu.Unlock()
 	if conn != nil {
 		_ = conn.Close()
 	}
@@ -375,11 +395,14 @@ func (b *LongConnBot) sendRequestWithTimeout(parent context.Context, req LongCon
 // runSession 完成一次完整的长连接会话生命周期。
 // 步骤包括：建立 WebSocket、发送订阅、启动读循环、启动心跳循环，并等待任一环节退出。
 func (b *LongConnBot) runSession(ctx context.Context) error {
+	ctx, stopSession := context.WithCancel(ctx)
+	defer stopSession()
 	conn, _, err := b.dialer.DialContext(ctx, b.wsURL, nil)
 	if err != nil {
 		return err
 	}
 
+	conn.SetReadLimit(2 << 20)
 	// 关键步骤：连接建好后立即注册为当前活跃连接，便于主动发送复用。
 	b.setConn(conn)
 	defer b.releaseConn(conn, errors.New("longconn session closed"))
@@ -407,6 +430,11 @@ func (b *LongConnBot) runSession(ctx context.Context) error {
 		return err
 	}
 
+	b.connMu.Lock()
+	if b.conn == conn {
+		b.ready = true
+	}
+	b.connMu.Unlock()
 	pingErrCh := make(chan error, 1)
 	go b.pingLoop(ctx, pingErrCh)
 
@@ -457,7 +485,12 @@ func (b *LongConnBot) readLoop(conn *websocket.Conn, errCh chan<- error) {
 		}
 
 		if frame.IsCallback() {
-			b.handleCallback(frame)
+			var msg Message
+			if frame.UnmarshalBody(&msg) == nil && msg.Event != nil && msg.Event.EventType == "disconnected_event" {
+				errCh <- ErrLongConnReplaced
+				return
+			}
+			go b.handleCallback(frame)
 		}
 	}
 }
@@ -498,7 +531,16 @@ func (b *LongConnBot) handleCallback(frame LongConnRawFrame) {
 		return
 	}
 
+	command := b.resolveReplyCommand(frame.Cmd, &msg)
+	if command == "" || frame.Headers.RequestID == "" || !b.acceptCallback(frame, msg) {
+		return
+	}
+	messageID := msg.MsgID
+	if messageID == "" {
+		messageID = frame.Headers.RequestID
+	}
 	ctx := Context{
+		StreamID:  messageID,
 		Message:   &msg,
 		RequestID: frame.Headers.RequestID,
 		LongConn:  b,
@@ -511,9 +553,9 @@ func (b *LongConnBot) handleCallback(frame LongConnRawFrame) {
 	// 根据回调类型推断后续要发送的长连接回复命令。
 	switch b.resolveReplyCommand(frame.Cmd, &msg) {
 	case LongConnCmdRespondMsg:
-		go b.consumeMessageChunks(frame.Headers.RequestID, outCh)
+		b.reportDeliveryError(b.consumeMessageChunks(frame.Headers.RequestID, outCh))
 	case LongConnCmdRespondWelcomeMsg, LongConnCmdRespondUpdateMsg:
-		go b.consumeOneShotChunks(
+		b.consumeOneShotChunks(
 			b.resolveReplyCommand(frame.Cmd, &msg),
 			frame.Headers.RequestID,
 			outCh,
@@ -547,72 +589,23 @@ func (b *LongConnBot) resolveReplyCommand(callbackCmd string, msg *Message) stri
 
 // consumeMessageChunks 消费业务层输出，并转为 `aibot_respond_msg` 命令。
 // 流式文本会自动累积为企业微信要求的“完整内容”形式。
-func (b *LongConnBot) consumeMessageChunks(requestID string, outCh <-chan Chunk) {
-	streamID := generateStreamID()
-	accumulated := ""
-	sentAny := false
-	finished := false
+func (b *LongConnBot) consumeMessageChunks(requestID string, source <-chan Chunk) error {
+	return b.consumeMessageChunksWithWindow(requestID, source, 4*time.Second, 9*time.Minute)
+}
 
-	for chunk := range outCh {
-		if chunk.Replace && chunk.Payload != nil {
-			return
-		}
-		// NoResponse 在长连接消息回复场景中表示业务层显式放弃回复。
-		if chunk.Payload == NoResponse {
-			return
-		}
-
-		// 若业务层直接返回了完整协议负载，则透传发送。
-		if chunk.Payload != nil {
-			body, err := normalizeLongConnMessageBody(chunk.Payload)
-			if err != nil {
-				return
-			}
-			if err := b.sendCallbackCommand(LongConnCmdRespondMsg, requestID, body); err != nil {
-				return
-			}
-			sentAny = true
-			if chunk.IsFinal {
-				finished = true
-				return
-			}
-			continue
-		}
-
-		if chunk.Content == "" && !chunk.IsFinal && !chunk.Replace {
-			continue
-		}
-
-		// 长连接模式要求 stream.content 始终传当前累积全文。
-		if chunk.Replace {
-			accumulated = chunk.Content
-		} else {
-			accumulated += chunk.Content
-		}
-		reply := BuildStreamReply(streamID, accumulated, chunk.IsFinal)
-		if err := b.sendCallbackCommand(LongConnCmdRespondMsg, requestID, reply); err != nil {
-			return
-		}
-		sentAny = true
-		if chunk.IsFinal {
-			finished = true
-			return
-		}
-	}
-
-	// 若业务提前关闭 channel 且已经发过流式片段，则补一个 finish=true 结束包。
-	if sentAny && !finished {
-		_ = b.sendCallbackCommand(
-			LongConnCmdRespondMsg,
-			requestID,
-			BuildStreamReply(streamID, accumulated, true),
-		)
+func (b *LongConnBot) reportDeliveryError(err error) {
+	if err != nil && b.onError != nil {
+		b.onError(err)
 	}
 }
 
 // consumeOneShotChunks 消费单次回复类输出，并转为欢迎语或卡片更新命令。
 // 该路径用于 enter_chat / template_card_event 等非流式回调。
 func (b *LongConnBot) consumeOneShotChunks(command string, requestID string, outCh <-chan Chunk) {
+	defer func() {
+		for range outCh {
+		}
+	}()
 	var (
 		lastPayload any
 		accumulated string
@@ -644,7 +637,7 @@ func (b *LongConnBot) consumeOneShotChunks(command string, requestID string, out
 	if err != nil || body == nil {
 		return
 	}
-	_ = b.sendCallbackCommand(command, requestID, body)
+	b.reportDeliveryError(b.sendCallbackCommand(command, requestID, body))
 }
 
 // normalizeLongConnMessageBody 将业务层 Payload 归一化为长连接普通消息回复体。
@@ -774,6 +767,9 @@ func (b *LongConnBot) sendRequestAndWaitResponse(ctx context.Context, command, r
 		return LongConnResponse{}, errors.New("longconn websocket is not connected")
 	}
 
+	if err := b.waitMessageRate(ctx, command, requestID, body); err != nil {
+		return LongConnResponse{}, err
+	}
 	waiter := b.registerPending(requestID)
 	defer b.unregisterPending(requestID, waiter)
 
@@ -875,6 +871,7 @@ func (b *LongConnBot) failAllPending(err error) {
 func (b *LongConnBot) setConn(conn *websocket.Conn) {
 	b.connMu.Lock()
 	b.conn = conn
+	b.ready = false
 	b.connMu.Unlock()
 }
 
@@ -882,6 +879,7 @@ func (b *LongConnBot) setConn(conn *websocket.Conn) {
 func (b *LongConnBot) releaseConn(conn *websocket.Conn, err error) {
 	b.connMu.Lock()
 	if b.conn == conn {
+		b.ready = false
 		b.conn = nil
 	}
 	b.connMu.Unlock()

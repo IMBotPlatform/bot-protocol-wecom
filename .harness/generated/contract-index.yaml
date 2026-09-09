@@ -132,3 +132,13 @@ downstream_consumers:
     path: pkg/platform/wecom
   - repo: wechataibot
     path: internal/media/image_support.go
+
+longconn_delivery:
+  owner: pkg/wecom/longconn_stream.go
+  readiness: LongConnBot.Ready
+  terminal_disconnect: ErrLongConnReplaced
+  async_error_hook: LongConnOptions.OnError
+  callback_identity: msgid_or_req_id
+  text_update_interval: 4s
+  stream_window: 9m
+  validation: pkg/wecom/longconn_integration_test.go
