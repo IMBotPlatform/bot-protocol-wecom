@@ -49,6 +49,12 @@
 - `BOT_*` 环境变量只是在未显式传参时提供默认值
 - `NoResponse` 与 `ErrNoResponse` 都表示“不要回复”，但触发路径不同
 
+## Text snapshots and delivery acknowledgements
+
+`Chunk.Replace=true` replaces the accumulated text, including an empty snapshot; the default remains append. Replacement snapshots supersede queued text so a producer can finish even after the client stops polling. HTTP streaming, long-connection streaming and one-shot replies share this meaning. `Replace` must not be combined with `Payload`. See `pkg/wecom/handler.go`, `stream.go`, `longconn_bot.go` and `snapshot_test.go`; downstream adapters must preserve the flag.
+
+`Bot.Response` requires both HTTP 200 and a JSON acknowledgement containing `errcode=0`. Invalid/missing acknowledgements and transport failure do not prove delivery. Errors expose status/code only, without echoing response URLs or upstream bodies; callers must not blindly retry an uncertain delivery.
+
 ## Evidence
 
 - `pkg/wecom/bot.go`

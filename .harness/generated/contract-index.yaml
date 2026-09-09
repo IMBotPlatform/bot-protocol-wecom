@@ -79,6 +79,11 @@ enums:
       - video
 
 schemas:
+  - name: Chunk
+    path: pkg/wecom/handler.go
+    semantics:
+      - Replace=false appends text; Replace=true replaces the full snapshot, including empty text
+      - Replace and Payload are mutually exclusive
   - name: Message
     path: pkg/wecom/message.go
   - name: EncryptedRequest

@@ -383,7 +383,7 @@ func (b *Bot) doHandler(outCh <-chan Chunk, streamID string) {
 			return
 		}
 		// 空 chunk 过滤：不能丢弃仅携带 MsgItems 的片段。
-		if chunk.Content == "" && chunk.Payload == nil && len(chunk.MsgItems) == 0 && !chunk.IsFinal {
+		if chunk.Content == "" && chunk.Payload == nil && len(chunk.MsgItems) == 0 && !chunk.IsFinal && !chunk.Replace {
 			continue
 		}
 
@@ -412,20 +412,27 @@ func (b *Bot) Response(responseURL string, msg any) error {
 
 	req, err := http.NewRequest(http.MethodPost, responseURL, bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		return fmt.Errorf("create response request failed")
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := b.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("do request: %w", err)
+		return fmt.Errorf("response delivery outcome unknown")
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
-
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("wecom api error: status=%d body=%s", resp.StatusCode, string(respBody))
+		return fmt.Errorf("wecom api error: status=%d", resp.StatusCode)
+	}
+	var result struct {
+		ErrCode *int `json:"errcode"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 65536)).Decode(&result); err != nil || result.ErrCode == nil {
+		return fmt.Errorf("response delivery outcome unknown: invalid acknowledgement")
+	}
+	if *result.ErrCode != 0 {
+		return fmt.Errorf("wecom api error: errcode=%d", *result.ErrCode)
 	}
 
 	return nil
@@ -544,7 +551,7 @@ func (b *Bot) downloadURL(url string) ([]byte, error) {
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return nil, fmt.Errorf("create download request failed")
 	}
 
 	resp, err := b.client.Do(req)

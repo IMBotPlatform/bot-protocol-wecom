@@ -554,6 +554,9 @@ func (b *LongConnBot) consumeMessageChunks(requestID string, outCh <-chan Chunk)
 	finished := false
 
 	for chunk := range outCh {
+		if chunk.Replace && chunk.Payload != nil {
+			return
+		}
 		// NoResponse 在长连接消息回复场景中表示业务层显式放弃回复。
 		if chunk.Payload == NoResponse {
 			return
@@ -576,12 +579,16 @@ func (b *LongConnBot) consumeMessageChunks(requestID string, outCh <-chan Chunk)
 			continue
 		}
 
-		if chunk.Content == "" && !chunk.IsFinal {
+		if chunk.Content == "" && !chunk.IsFinal && !chunk.Replace {
 			continue
 		}
 
 		// 长连接模式要求 stream.content 始终传当前累积全文。
-		accumulated += chunk.Content
+		if chunk.Replace {
+			accumulated = chunk.Content
+		} else {
+			accumulated += chunk.Content
+		}
 		reply := BuildStreamReply(streamID, accumulated, chunk.IsFinal)
 		if err := b.sendCallbackCommand(LongConnCmdRespondMsg, requestID, reply); err != nil {
 			return
@@ -612,14 +619,21 @@ func (b *LongConnBot) consumeOneShotChunks(command string, requestID string, out
 	)
 
 	for chunk := range outCh {
+		if chunk.Replace && chunk.Payload != nil {
+			return
+		}
 		if chunk.Payload == NoResponse {
 			return
 		}
 		if chunk.Payload != nil {
 			lastPayload = chunk.Payload
 		}
-		if chunk.Content != "" {
-			accumulated += chunk.Content
+		if chunk.Content != "" || chunk.Replace {
+			if chunk.Replace {
+				accumulated = chunk.Content
+			} else {
+				accumulated += chunk.Content
+			}
 		}
 		if chunk.IsFinal {
 			break

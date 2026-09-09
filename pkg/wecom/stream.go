@@ -106,6 +106,9 @@ func (m *StreamManager) createOrGet(msg *Message) (*Stream, bool) {
 // Returns:
 //   - bool: 成功写入返回 true
 func (m *StreamManager) publish(streamID string, chunk Chunk) bool {
+	if chunk.Replace && chunk.Payload != nil {
+		return false
+	}
 	stream := m.getStream(streamID)
 	if stream == nil {
 		return false
@@ -117,7 +120,7 @@ func (m *StreamManager) publish(streamID string, chunk Chunk) bool {
 	fullChunk := chunk
 	// 企业微信要求 content 为"最新完整内容"，因此这里累积全文后再入队。
 	// 注意：若携带 Payload，视为非文本回复，清空累计内容。
-	if chunk.Payload == nil && stream.LastChunk != nil {
+	if chunk.Payload == nil && stream.LastChunk != nil && !chunk.Replace {
 		fullChunk.Content = stream.LastChunk.Content + chunk.Content
 	} else if chunk.Payload != nil {
 		fullChunk.Content = ""
@@ -134,6 +137,18 @@ func (m *StreamManager) publish(streamID string, chunk Chunk) bool {
 	finished := fullChunk.IsFinal
 	stream.mu.Unlock()
 
+	// A replacement supersedes queued text snapshots, including an empty one.
+	// Keeping obsolete snapshots would stall a local run after WeCom stops polling.
+	if chunk.Replace {
+		for {
+			select {
+			case <-stream.queue:
+				continue
+			default:
+			}
+			break
+		}
+	}
 	// 尝试无阻塞写入队列，队列满则等待消费后写入。
 	select {
 	case stream.queue <- fullChunk:
@@ -211,7 +226,7 @@ func (m *StreamManager) getLatestChunk(streamID string) *Chunk {
 		stream.LastAccess = time.Now()
 		var cached *Chunk
 		// 仅在已完成时返回缓存片段，避免返回半成品。
-		if stream.Finished && stream.LastChunk != nil {
+		if stream.LastChunk != nil && (stream.Finished || stream.LastChunk.Replace) {
 			// 拷贝一份，避免外部修改影响缓存。
 			clone := *stream.LastChunk
 			cached = &clone

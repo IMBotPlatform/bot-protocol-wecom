@@ -36,6 +36,7 @@
 ## Hard Constraints
 
 - 保持企业微信回调协议兼容性
+- `Chunk.Replace` 为完整文本替换，默认仍追加；不得与 `Payload` 混用，下游适配器必须透传。
 - 不把上层业务概念引入 SDK 包
 - 变更公开消息结构、`Bot` 构造函数、长连接请求结构时，需提示下游 `IMBotCore`
 

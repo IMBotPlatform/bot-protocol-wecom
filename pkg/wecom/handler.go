@@ -7,6 +7,8 @@ package wecom
 //   - IsFinal: 是否为最终片段
 //   - MsgItems: 图文混排子消息（用于流式回复 msg_item，仅在 IsFinal=true 时生效）
 type Chunk struct {
+	// Replace replaces the entire text snapshot; false appends. Do not combine with Payload.
+	Replace bool
 	Content string
 	Payload any
 	IsFinal bool
